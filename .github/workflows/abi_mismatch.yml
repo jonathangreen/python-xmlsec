@@ -1,0 +1,91 @@
+name: abi_mismatch
+
+# Regression test for issue #356.
+#
+# Historically, ``xmlsec`` shared raw ``xmlNodePtr`` values with ``lxml``
+# across the libxml2 ABI boundary. When the two libraries linked against
+# different ``libxml2`` versions (e.g. ``lxml`` from a binary wheel +
+# ``xmlsec`` built from sdist against the system ``libxml2``), the C
+# struct layouts diverged and operations crashed or corrupted memory.
+# A defensive runtime check raised
+# ``xmlsec.InternalError: lxml & xmlsec libxml2 library version mismatch``
+# at import time on any mismatched setup.
+#
+# After the fix, the C extension only exchanges serialized XML bytes
+# with ``lxml`` — no pointer ever crosses the boundary — so a libxml2
+# ABI mismatch is no longer load-bearing. This job intentionally forces
+# the mismatch (lxml wheel + xmlsec sdist) and runs the full pytest
+# suite to ensure the historical failure mode does not return.
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'master' }}
+
+jobs:
+  abi_mismatch:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v5.0.0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel 'setuptools_scm>=8'
+
+      - name: Install system libxml2 + libxmlsec1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev libxmlsec1-dev libxmlsec1-openssl
+
+      - name: Build xmlsec sdist
+        run: |
+          python setup.py sdist
+
+      # Critical: install lxml as a binary wheel (bundles its own libxml2),
+      # then install xmlsec from sdist (which links against the system
+      # libxml2 from libxml2-dev). The two libxml2's MUST differ for this
+      # job to be a meaningful regression test — we verify that below.
+      - name: Install lxml wheel + xmlsec sdist
+        run: |
+          pip install --upgrade --only-binary lxml lxml
+          pip install --upgrade -r requirements-test.txt --only-binary lxml
+          pip install dist/xmlsec-$(python setup.py --version).tar.gz
+
+      - name: Verify libxml2 versions actually differ
+        run: |
+          python <<'PY'
+          import sys
+          from lxml import etree
+          import xmlsec
+
+          lxml_ver = etree.LIBXML_VERSION
+          xmlsec_ver = xmlsec.get_libxml_version()
+          print(f"lxml libxml2:   {lxml_ver}")
+          print(f"xmlsec libxml2: {xmlsec_ver}")
+
+          # The whole point of this job: lxml + xmlsec must be running
+          # against different libxml2 versions for the regression test
+          # to mean anything.
+          if lxml_ver[:2] == xmlsec_ver[:2]:
+              print(
+                  "ERROR: lxml and xmlsec are using the same libxml2 major.minor; "
+                  "this regression test would not detect a re-introduced ABI gap.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          PY
+
+      - name: Run tests
+        run: |
+          pytest -v --color=yes

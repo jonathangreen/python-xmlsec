@@ -357,13 +357,17 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptXml(PyObject* self, PyObject*
     PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, op_ctx);
     Py_END_ALLOW_THREADS;
     if (rv < 0) {
-        // ``copied`` was created via xmlDocCopyNode(..., node_doc, ...), so
-        // node_doc tracks the node either as part of its tree (if xmlsec
-        // attached it before failing) or as an unreferenced free node (if
-        // xmlsec freed its own reference but left node_doc owning it). In
-        // both cases ``xmlFreeDoc(node_doc)`` below cleans up correctly.
-        // Calling xmlFreeNode(copied) explicitly here would risk a
-        // double-free in the first case.
+        // ``copied`` was made by xmlDocCopyNode(..., node_doc, 1), which sets
+        // its ->doc but does NOT attach it to node_doc's tree. xmlFreeDoc only
+        // walks attached children, so an orphaned ``copied`` would leak. After
+        // successful xmlReplaceNode (or xmlAddChild) inside xmlsec, libxml2
+        // sets ->parent (to the parent element, or to the doc itself for a
+        // root). NULL parent here therefore means xmlsec failed before
+        // attaching, and we own the cleanup.
+        if (copied != NULL && copied->parent == NULL) {
+            xmlFreeNode(copied);
+            copied = NULL;
+        }
         PyXmlSec_SetLastError("failed to encrypt xml");
         goto ON_FAIL;
     }

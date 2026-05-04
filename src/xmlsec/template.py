@@ -25,6 +25,11 @@ _consts = _impl.constants
 _DSIG_NS = _consts.DSigNs
 _ENC_NS = _consts.EncNs
 
+# The C extension's ``__Transform`` type isn't exported by name on the
+# constants module, but every transform constant (e.g. ``TransformExclC14N``)
+# is an instance of it, so we recover the class from a known instance.
+_TRANSFORM_CLS = type(_consts.TransformExclC14N)
+
 # Common XMLDSig element local names.
 _NODE_SIGNATURE = 'Signature'
 _NODE_SIGNED_INFO = 'SignedInfo'
@@ -56,20 +61,13 @@ _NODE_CIPHER_DATA = 'CipherData'
 _NODE_CIPHER_VALUE = 'CipherValue'
 _NODE_INCLUSIVE_NAMESPACES = 'InclusiveNamespaces'
 
-# Duck-typed marker for ``xmlsec.constants.__Transform`` instances.
-# TODO: replace this with isinstance(transform, _impl.constants._Transform)
-# once the C type is exposed by name; relying on ``tp_name`` is brittle if
-# the C extension ever renames the type.
-_TRANSFORM_TYPE_NAME = '__Transform'
-
-
 def _check_element(node: _Element, what: str = 'node') -> None:
     if not etree.iselement(node):
         raise TypeError(f'{what} must be lxml.etree._Element')
 
 
 def _check_transform(transform: object, what: str = 'transform') -> None:
-    if type(transform).__name__ != _TRANSFORM_TYPE_NAME or not hasattr(transform, 'href'):
+    if not isinstance(transform, _TRANSFORM_CLS):
         raise TypeError(f'{what} must be an xmlsec.constants.__Transform')
 
 

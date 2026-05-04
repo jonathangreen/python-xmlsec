@@ -9,7 +9,6 @@ libxml2 — the design fix for issue #356.
 
 from __future__ import annotations
 
-import copy
 import sys as _sys
 
 from lxml import etree
@@ -222,12 +221,10 @@ class EncryptionContext:
             data_bytes = bytes(data)
         else:
             raise TypeError('data must be bytes or str')
-        original_tail = template.tail
         fragment = etree.tostring(template, with_tail=False)
         result_bytes = self._impl._encrypt_binary(fragment, data_bytes)
         new_template = etree.fromstring(result_bytes)
         _bridge.replace_in_place(template, new_template)
-        template.tail = original_tail
         return template
 
     def encrypt_uri(self, template: _Element, uri: str) -> _Element:
@@ -236,12 +233,10 @@ class EncryptionContext:
             raise TypeError('template must be lxml.etree._Element')
         if not isinstance(uri, str):
             raise TypeError('uri must be a string')
-        original_tail = template.tail
         fragment = etree.tostring(template, with_tail=False)
         result_bytes = self._impl._encrypt_uri(fragment, uri)
         new_template = etree.fromstring(result_bytes)
         _bridge.replace_in_place(template, new_template)
-        template.tail = original_tail
         return template
 
     def encrypt_xml(self, template: _Element, node: _Element) -> _Element:
@@ -299,31 +294,32 @@ class EncryptionContext:
                 if parent is None:
                     # The document root itself was encrypted, so the
                     # result root is the new <EncryptedData> element.
-                    new_enc = copy.deepcopy(new_tree.getroot())
+                    new_enc = new_tree.getroot()
                     node.getroottree()._setroot(new_enc)
                     return new_enc
                 _bridge.replace_in_place(node_root, new_tree.getroot())
                 return _bridge.locate(node_root.getroottree(), node_path)
 
-            new_enc = copy.deepcopy(post_op)
             if parent is None:
                 # ``_setroot`` is lxml-private (leading underscore) but
                 # has been the documented way to swap a tree's root for
                 # well over a decade and is stable across all supported
                 # lxml versions; lxml exposes no public alternative.
-                node.getroottree()._setroot(new_enc)
-            else:
-                parent.replace(node, new_enc)
-            return new_enc
+                node.getroottree()._setroot(post_op)
+                return post_op
+            parent.replace(node, post_op)
+            return post_op
         else:
             # Type=Content: node stays, its content is replaced.
             if template_path is not None:
                 node = _bridge.replace_in_place_preserving_path(node_root, new_tree.getroot(), node_path)
             else:
                 _bridge.replace_in_place(node, post_op)
-            # Return the <EncryptedData> child of node.
+            # Return the <EncryptedData> child of node (skip any leading
+            # comments / PIs that the C-side encryption may have left).
             for child in node:
-                return child
+                if isinstance(child.tag, str):
+                    return child
             raise InternalError('encrypt_xml(Type=Content) produced no EncryptedData child')
 
     def decrypt(self, node: _Element) -> _Element | bytes:
@@ -358,14 +354,14 @@ class EncryptionContext:
             # See note in encrypt_xml about ``_setroot`` being lxml-private
             # but the only stable way to swap a tree's root.
             new_root = new_tree.getroot()
-            node.getroottree()._setroot(copy.deepcopy(new_root))
-            return node.getroottree().getroot()
+            node.getroottree()._setroot(new_root)
+            return new_root
 
         if is_content:
             # Type=Content: ``node`` is removed entirely and its parent's
             # content (text / children) is replaced by the decrypted
             # payload in-place. The original C version returned the
-            # parent in this case (src/enc.c:421-429).
+            # parent in this case.
             parent_path = _bridge.structural_path(parent)
             post_op_parent = _bridge.locate(new_tree, parent_path)
             _bridge.replace_in_place(parent, post_op_parent)
@@ -373,8 +369,7 @@ class EncryptionContext:
 
         # Type=Element (or anything that isn't Content): node is replaced
         # by the decrypted element at the same parent slot.
-        post_op_at_path = _bridge.locate(new_tree, node_path)
-        decrypted = copy.deepcopy(post_op_at_path)
+        decrypted = _bridge.locate(new_tree, node_path)
         parent.replace(node, decrypted)
         return decrypted
 

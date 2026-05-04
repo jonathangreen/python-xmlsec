@@ -127,12 +127,16 @@ def clear_id_registrations() -> None:
 
 
 def _is_live_root(elem: _Element) -> bool:
-    """True if ``elem`` is still attached to (or is) a document root.
+    """True if ``elem`` still has a usable lxml proxy.
 
-    A registration whose root element is no longer reachable through any
-    document tree is dead — it cannot contribute id specs anymore. lxml
-    raises if ``getroottree()`` is called on a fully-destroyed proxy; we
-    treat any failure as dead.
+    Detached lxml elements remain "live" — ``getroottree()`` returns a
+    fresh tree wrapper rooted at the element itself. So this only filters
+    fully-invalidated proxies (e.g. ones whose backing libxml2 node was
+    freed out from under lxml). The actual relevance check — "is this
+    registration applicable to the doc we're operating on right now" —
+    is the ``root.getroottree().getroot() is not op_root`` test in
+    ``expand_tree_id_specs``. This guard exists only so that a destroyed
+    proxy in the registry can't crash that relevance test.
     """
     try:
         return elem.getroottree().getroot() is not None
@@ -176,14 +180,16 @@ def expand_tree_id_specs(op_tree: _ElementTree) -> List[IdSpec]:
 def replace_in_place(target: _Element, source: _Element) -> None:
     """Mutate ``target`` so its children/text/attribs match ``source``.
 
-    Tag, prefix, and nsmap of ``target`` are not touched — lxml's
-    ``_Element`` does not allow mutating those, and every wrapped op
-    leaves the addressed element's identity intact (sign mutates only
-    children of ``<Signature>``; encrypt/decrypt that fully replace an
-    element route through ``parent.replace`` instead).
+    ``target.tail`` is intentionally left alone: it lives in the parent's
+    sibling chain, not in the post-op subtree, so the parent's tail
+    layout is the caller's concern. Tag, prefix, and nsmap of ``target``
+    are not touched either — lxml's ``_Element`` does not allow mutating
+    those, and every wrapped op leaves the addressed element's identity
+    intact (sign mutates only children of ``<Signature>``; encrypt/decrypt
+    that fully replace an element route through ``parent.replace``
+    instead).
     """
     target.text = source.text
-    target.tail = source.tail
     target.attrib.clear()
     for k, v in source.attrib.items():
         target.set(k, v)
@@ -211,7 +217,6 @@ def replace_in_place_preserving_path(target: _Element, source: _Element, preserv
     preserved = replace_in_place_preserving_path(target_child, source_child, preserve_path[1:])
 
     target.text = source.text
-    target.tail = source.tail
     target.attrib.clear()
     for k, v in source.attrib.items():
         target.set(k, v)

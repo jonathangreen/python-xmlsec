@@ -29,6 +29,28 @@ typedef struct {
     PyXmlSec_KeysManager* manager;
 } PyXmlSec_EncryptionContext;
 
+static xmlSecEncCtxPtr PyXmlSec_EncryptionContextCreateOperationContext(PyXmlSec_EncryptionContext* ctx) {
+    xmlSecEncCtxPtr op_ctx = xmlSecEncCtxCreate(ctx->manager != NULL ? ctx->manager->handle : NULL);
+    if (op_ctx == NULL) {
+        PyXmlSec_SetLastError("failed to create the encryption context");
+        return NULL;
+    }
+
+    op_ctx->keyInfoReadCtx.flags = ctx->handle->keyInfoReadCtx.flags;
+    op_ctx->keyInfoWriteCtx.flags = ctx->handle->keyInfoWriteCtx.flags;
+
+    if (ctx->handle->encKey != NULL) {
+        op_ctx->encKey = xmlSecKeyDuplicate(ctx->handle->encKey);
+        if (op_ctx->encKey == NULL) {
+            xmlSecEncCtxDestroy(op_ctx);
+            PyXmlSec_SetLastError("failed to duplicate key");
+            return NULL;
+        }
+    }
+
+    return op_ctx;
+}
+
 static PyObject* PyXmlSec_EncryptionContext__new__(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)PyType_GenericNew(type, args, kwargs);
     PYXMLSEC_DEBUGF("%p: new enc context", ctx);
@@ -164,6 +186,7 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptBinary(PyObject* self, PyObje
     Py_ssize_t tmpl_len = 0;
     const char* data = NULL;
     Py_ssize_t data_size = 0;
+    xmlSecEncCtxPtr op_ctx = NULL;
     xmlDocPtr doc = NULL;
     xmlNodePtr template_root;
     PyObject* result = NULL;
@@ -182,10 +205,12 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptBinary(PyObject* self, PyObje
         PyErr_SetString(PyXmlSec_Error, "template fragment has no root element");
         goto ON_FAIL;
     }
+    op_ctx = PyXmlSec_EncryptionContextCreateOperationContext(ctx);
+    if (op_ctx == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecEncCtxBinaryEncrypt(ctx->handle, template_root, (const xmlSecByte*)data, (xmlSecSize)data_size);
-    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
+    rv = xmlSecEncCtxBinaryEncrypt(op_ctx, template_root, (const xmlSecByte*)data, (xmlSecSize)data_size);
+    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, op_ctx);
     Py_END_ALLOW_THREADS;
     if (rv < 0) {
         PyXmlSec_SetLastError("failed to encrypt binary");
@@ -195,6 +220,7 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptBinary(PyObject* self, PyObje
     result = pyxmlsec_dump_doc(doc);
 
 ON_FAIL:
+    if (op_ctx != NULL) xmlSecEncCtxDestroy(op_ctx);
     if (doc != NULL) xmlFreeDoc(doc);
     return result;
 }
@@ -209,6 +235,7 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptUri(PyObject* self, PyObject*
     const char* tmpl = NULL;
     Py_ssize_t tmpl_len = 0;
     const char* uri = NULL;
+    xmlSecEncCtxPtr op_ctx = NULL;
     xmlDocPtr doc = NULL;
     xmlNodePtr template_root;
     PyObject* result = NULL;
@@ -227,10 +254,12 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptUri(PyObject* self, PyObject*
         PyErr_SetString(PyXmlSec_Error, "template fragment has no root element");
         goto ON_FAIL;
     }
+    op_ctx = PyXmlSec_EncryptionContextCreateOperationContext(ctx);
+    if (op_ctx == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecEncCtxUriEncrypt(ctx->handle, template_root, (const xmlSecByte*)uri);
-    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
+    rv = xmlSecEncCtxUriEncrypt(op_ctx, template_root, (const xmlSecByte*)uri);
+    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, op_ctx);
     Py_END_ALLOW_THREADS;
     if (rv < 0) {
         PyXmlSec_SetLastError("failed to encrypt URI");
@@ -240,6 +269,7 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptUri(PyObject* self, PyObject*
     result = pyxmlsec_dump_doc(doc);
 
 ON_FAIL:
+    if (op_ctx != NULL) xmlSecEncCtxDestroy(op_ctx);
     if (doc != NULL) xmlFreeDoc(doc);
     return result;
 }
@@ -265,6 +295,7 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptXml(PyObject* self, PyObject*
     PyObject* template_path = NULL;
     PyObject* node_path = NULL;
     PyObject* template_bytes_obj = NULL;
+    xmlSecEncCtxPtr op_ctx = NULL;
     xmlDocPtr node_doc = NULL;
     xmlDocPtr tmpl_doc = NULL;
     xmlNodePtr tmpl_node = NULL;
@@ -318,10 +349,12 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptXml(PyObject* self, PyObject*
         PyErr_SetString(PyExc_TypeError, "_encrypt_xml requires either template_path or template_bytes");
         goto ON_FAIL;
     }
+    op_ctx = PyXmlSec_EncryptionContextCreateOperationContext(ctx);
+    if (op_ctx == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecEncCtxXmlEncrypt(ctx->handle, tmpl_node, node);
-    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
+    rv = xmlSecEncCtxXmlEncrypt(op_ctx, tmpl_node, node);
+    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, op_ctx);
     Py_END_ALLOW_THREADS;
     if (rv < 0) {
         // ``copied`` was created via xmlDocCopyNode(..., node_doc, ...), so
@@ -338,36 +371,39 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptXml(PyObject* self, PyObject*
     result = pyxmlsec_dump_doc(node_doc);
 
 ON_FAIL:
+    if (op_ctx != NULL) xmlSecEncCtxDestroy(op_ctx);
     if (tmpl_doc != NULL) xmlFreeDoc(tmpl_doc);
     if (node_doc != NULL) xmlFreeDoc(node_doc);
     return result;
 }
 
-// _decrypt(xml_bytes, base_url_or_none, node_path) -> ("bytes", payload) | ("xml", new_doc_bytes)
+// _decrypt(xml_bytes, base_url_or_none, node_path, id_specs) -> ("bytes", payload) | ("xml", new_doc_bytes)
 //
 // Bytes-based replacement for the old tree-taking decrypt: parse with
 // python-xmlsec's libxml2, run xmlSecEncCtxDecrypt at node_path, and
 // return a tagged tuple. The Python wrapper splices the result back
 // into the user's lxml tree.
 static const char PyXmlSec_EncryptionContext_Decrypt__doc__[] = \
-    "_decrypt(xml_bytes, base_url, node_path) -> (kind, payload)\n"
+    "_decrypt(xml_bytes, base_url, node_path, id_specs) -> (kind, payload)\n"
     "Internal: decrypt the EncryptedData/EncryptedKey at node_path.\n"
     "kind is 'bytes' (payload is the decrypted bytes) or 'xml' (payload is the modified doc bytes).\n";
 static PyObject* PyXmlSec_EncryptionContext_Decrypt(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "xml_bytes", "base_url", "node_path", NULL };
+    static char *kwlist[] = { "xml_bytes", "base_url", "node_path", "id_specs", NULL };
     PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
     const char* xml = NULL;
     Py_ssize_t xml_len = 0;
     PyObject* base_url_obj = NULL;
     PyObject* node_path = NULL;
+    PyObject* id_specs = NULL;
+    xmlSecEncCtxPtr op_ctx = NULL;
     xmlDocPtr doc = NULL;
     xmlNodePtr node;
     PyObject* result = NULL;
     const char* base_url = NULL;
     int rv;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#OO!:_decrypt", kwlist,
-        &xml, &xml_len, &base_url_obj, &PyList_Type, &node_path))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#OO!O!:_decrypt", kwlist,
+        &xml, &xml_len, &base_url_obj, &PyList_Type, &node_path, &PyList_Type, &id_specs))
     {
         goto ON_FAIL;
     }
@@ -379,15 +415,19 @@ static PyObject* PyXmlSec_EncryptionContext_Decrypt(PyObject* self, PyObject* ar
     doc = pyxmlsec_load_doc(xml, xml_len, base_url);
     if (doc == NULL) goto ON_FAIL;
 
+    if (PyList_Size(id_specs) > 0 && pyxmlsec_apply_id_specs(doc, id_specs) < 0) goto ON_FAIL;
+
     node = pyxmlsec_resolve_path(doc, node_path);
     if (node == NULL) goto ON_FAIL;
+    op_ctx = PyXmlSec_EncryptionContextCreateOperationContext(ctx);
+    if (op_ctx == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    ctx->handle->mode = xmlSecCheckNodeName(node, xmlSecNodeEncryptedKey, xmlSecEncNs)
+    op_ctx->mode = xmlSecCheckNodeName(node, xmlSecNodeEncryptedKey, xmlSecEncNs)
         ? xmlEncCtxModeEncryptedKey
         : xmlEncCtxModeEncryptedData;
-    rv = xmlSecEncCtxDecrypt(ctx->handle, node);
-    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
+    rv = xmlSecEncCtxDecrypt(op_ctx, node);
+    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, op_ctx);
     Py_END_ALLOW_THREADS;
 
     if (rv < 0) {
@@ -395,11 +435,11 @@ static PyObject* PyXmlSec_EncryptionContext_Decrypt(PyObject* self, PyObject* ar
         goto ON_FAIL;
     }
 
-    if (!ctx->handle->resultReplaced) {
+    if (!op_ctx->resultReplaced) {
         // Binary decryption: return ("bytes", payload).
         PyObject* payload = PyBytes_FromStringAndSize(
-            (const char*)xmlSecBufferGetData(ctx->handle->result),
-            (Py_ssize_t)xmlSecBufferGetSize(ctx->handle->result));
+            (const char*)xmlSecBufferGetData(op_ctx->result),
+            (Py_ssize_t)xmlSecBufferGetSize(op_ctx->result));
         if (payload == NULL) goto ON_FAIL;
         result = Py_BuildValue("(sO)", "bytes", payload);
         Py_DECREF(payload);
@@ -412,6 +452,7 @@ static PyObject* PyXmlSec_EncryptionContext_Decrypt(PyObject* self, PyObject* ar
     }
 
 ON_FAIL:
+    if (op_ctx != NULL) xmlSecEncCtxDestroy(op_ctx);
     if (doc != NULL) xmlFreeDoc(doc);
     return result;
 }

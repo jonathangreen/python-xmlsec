@@ -1,3 +1,4 @@
+import os
 import tempfile
 
 from lxml import etree
@@ -9,6 +10,20 @@ consts = xmlsec.constants
 
 
 class TestEncryptionContext(base.TestMemoryLeaks):
+    def _create_aes_context(self):
+        ctx = xmlsec.EncryptionContext()
+        ctx.key = xmlsec.Key.generate(consts.KeyDataAes, 128, consts.KeyDataTypeSession)
+        return ctx
+
+    def _create_binary_template(self):
+        root = etree.Element('root')
+        enc_data = xmlsec.template.encrypted_data_create(
+            root, consts.TransformAes128Cbc, type=consts.TypeEncContent, ns='xenc', mime_type='binary/octet-stream'
+        )
+        xmlsec.template.encrypted_data_ensure_cipher_value(enc_data)
+        root.append(enc_data)
+        return root, enc_data
+
     def test_init(self):
         ctx = xmlsec.EncryptionContext(manager=xmlsec.KeysManager())
         del ctx
@@ -82,6 +97,21 @@ class TestEncryptionContext(base.TestMemoryLeaks):
         cipher_value = xmlsec.tree.find_node(ki, consts.NodeCipherValue, consts.EncNs)
         self.assertIsNotNone(cipher_value)
 
+    def test_encrypt_xml_attached_template_updates_full_document(self):
+        root = etree.Element('Envelope')
+        data = etree.SubElement(root, 'Data')
+        data.text = 'secret'
+        template_holder = etree.SubElement(root, 'Templates')
+        enc_data = xmlsec.template.encrypted_data_create(root, consts.TransformAes128Cbc, type=consts.TypeEncElement, ns='xenc')
+        xmlsec.template.encrypted_data_ensure_cipher_value(enc_data)
+        template_holder.append(enc_data)
+
+        encrypted = self._create_aes_context().encrypt_xml(enc_data, data)
+
+        self.assertIs(root[0], encrypted)
+        self.assertEqual(f'{{{consts.EncNs}}}{consts.NodeEncryptedData}', encrypted.tag)
+        self.assertEqual(0, len(root.find('Templates')))
+
     def test_encrypt_xml_bad_args(self):
         ctx = xmlsec.EncryptionContext()
         with self.assertRaises(TypeError):
@@ -138,6 +168,15 @@ class TestEncryptionContext(base.TestMemoryLeaks):
         cipher_value = xmlsec.tree.find_node(ki, consts.NodeCipherValue, consts.EncNs)
         self.assertIsNotNone(cipher_value)
 
+    def test_encrypt_binary_preserves_attached_template_tail(self):
+        _root, enc_data = self._create_binary_template()
+        enc_data.tail = 'tail-text'
+
+        encrypted = self._create_aes_context().encrypt_binary(enc_data, b'test')
+
+        self.assertEqual(f'{{{consts.EncNs}}}{consts.NodeEncryptedData}', encrypted.tag)
+        self.assertEqual('tail-text', encrypted.tail)
+
     def test_encrypt_binary_bad_args(self):
         ctx = xmlsec.EncryptionContext()
         with self.assertRaises(TypeError):
@@ -183,6 +222,21 @@ class TestEncryptionContext(base.TestMemoryLeaks):
         cipher_value = xmlsec.tree.find_node(ki, consts.NodeCipherValue, consts.EncNs)
         self.assertIsNotNone(cipher_value)
 
+    def test_encrypt_uri_preserves_attached_template_tail(self):
+        _root, enc_data = self._create_binary_template()
+        enc_data.tail = 'tail-text'
+        with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+            tmpfile.write(b'test')
+            tmpfile_name = tmpfile.name
+
+        try:
+            encrypted = self._create_aes_context().encrypt_uri(enc_data, 'file://' + tmpfile_name)
+        finally:
+            os.unlink(tmpfile_name)
+
+        self.assertEqual(f'{{{consts.EncNs}}}{consts.NodeEncryptedData}', encrypted.tag)
+        self.assertEqual('tail-text', encrypted.tail)
+
     def test_encrypt_uri_bad_args(self):
         ctx = xmlsec.EncryptionContext()
         with self.assertRaises(TypeError):
@@ -216,6 +270,35 @@ class TestEncryptionContext(base.TestMemoryLeaks):
         decrypted = ctx.decrypt(enc_data)
         self.assertIsNotNone(decrypted)
         self.assertEqual(self.load_xml('enc3-in.xml'), decrypted)
+
+    def test_decrypt_uses_tree_add_ids_for_retrieval_method(self):
+        root = self.load_xml('enc2-out.xml')
+        enc_data = xmlsec.tree.find_child(root, consts.NodeEncryptedData, consts.EncNs)
+        self.assertIsNotNone(enc_data)
+        key_info = xmlsec.tree.find_child(enc_data, consts.NodeKeyInfo, consts.DSigNs)
+        self.assertIsNotNone(key_info)
+        enc_key = xmlsec.tree.find_child(key_info, consts.NodeEncryptedKey, consts.EncNs)
+        self.assertIsNotNone(enc_key)
+        enc_key.set('Id', 'key')
+        key_info.remove(enc_key)
+        root.insert(0, enc_key)
+        retrieval = etree.Element(etree.QName(consts.DSigNs, 'RetrievalMethod'), nsmap={'dsig': consts.DSigNs})
+        retrieval.set('URI', '#key')
+        retrieval.set('Type', consts.EncNs + consts.NodeEncryptedKey)
+        key_info.append(retrieval)
+        xmlsec.tree.add_ids(root, ['Id'])
+
+        try:
+            manager = xmlsec.KeysManager()
+            manager.add_key(xmlsec.Key.from_file(self.path('rsakey.pem'), format=consts.KeyDataFormatPem))
+            ctx = xmlsec.EncryptionContext(manager)
+            decrypted = ctx.decrypt(enc_data)
+        finally:
+            xmlsec.tree.clear_ids()
+
+        self.assertIs(root, decrypted)
+        self.assertIsNone(xmlsec.tree.find_child(root, consts.NodeEncryptedData, consts.EncNs))
+        self.assertIn('test', ''.join(root.itertext()))
 
     def check_decrypt(self, i):
         root = self.load_xml(f'enc{i}-out.xml')

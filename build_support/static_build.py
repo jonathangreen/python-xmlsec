@@ -7,7 +7,7 @@ from .lib_xmlsec_dependency_builder import CrossCompileInfo, LibXmlsecDependency
 class StaticBuildHelper:
     def __init__(self, builder):
         self.builder = builder
-        self.ext = builder.ext_map['xmlsec']
+        self.ext = builder.ext_map['xmlsec._impl']
         self.info = builder.info
 
     def prepare(self, platform_name):

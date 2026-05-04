@@ -1,5 +1,7 @@
 import unittest
 
+from lxml import etree
+
 import xmlsec
 from tests import base
 
@@ -108,6 +110,25 @@ class TestSignContext(base.TestMemoryLeaks):
 
         ctx.sign(sign)
         self.assertEqual(self.load_xml('sign2-out.xml'), root)
+
+    def test_sign_template_after_comment_sibling(self):
+        root = self.load_xml('sign2-in.xml')
+        root.append(etree.Comment('before signature'))
+        sign = xmlsec.template.create(root, consts.TransformExclC14N, consts.TransformRsaSha1)
+        root.append(sign)
+        ref = xmlsec.template.add_reference(sign, consts.TransformSha1)
+        xmlsec.template.add_transform(ref, consts.TransformEnveloped)
+        ki = xmlsec.template.ensure_key_info(sign)
+        xmlsec.template.add_key_name(ki)
+
+        ctx = xmlsec.SignatureContext()
+        ctx.key = xmlsec.Key.from_file(self.path('rsakey.pem'), format=consts.KeyDataFormatPem)
+        ctx.key.name = 'rsakey.pem'
+        ctx.sign(sign)
+
+        verify_ctx = xmlsec.SignatureContext()
+        verify_ctx.key = xmlsec.Key.from_file(self.path('rsapub.pem'), format=consts.KeyDataFormatPem)
+        verify_ctx.verify(sign)
 
     def test_sign_case3(self):
         """Should sign a file using a dynamicaly created template, key from PEM and an X509 cert."""

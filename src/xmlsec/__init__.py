@@ -222,10 +222,12 @@ class EncryptionContext:
             data_bytes = bytes(data)
         else:
             raise TypeError('data must be bytes or str')
-        fragment = etree.tostring(template)
+        original_tail = template.tail
+        fragment = etree.tostring(template, with_tail=False)
         result_bytes = self._impl._encrypt_binary(fragment, data_bytes)
         new_template = etree.fromstring(result_bytes)
         _bridge.replace_in_place(template, new_template)
+        template.tail = original_tail
         return template
 
     def encrypt_uri(self, template: _Element, uri: str) -> _Element:
@@ -234,10 +236,12 @@ class EncryptionContext:
             raise TypeError('template must be lxml.etree._Element')
         if not isinstance(uri, str):
             raise TypeError('uri must be a string')
-        fragment = etree.tostring(template)
+        original_tail = template.tail
+        fragment = etree.tostring(template, with_tail=False)
         result_bytes = self._impl._encrypt_uri(fragment, uri)
         new_template = etree.fromstring(result_bytes)
         _bridge.replace_in_place(template, new_template)
+        template.tail = original_tail
         return template
 
     def encrypt_xml(self, template: _Element, node: _Element) -> _Element:
@@ -275,7 +279,7 @@ class EncryptionContext:
             template_bytes_obj = None
         else:
             template_path = None
-            template_bytes_obj = etree.tostring(template)
+            template_bytes_obj = etree.tostring(template, with_tail=False)
 
         result_bytes = self._impl._encrypt_xml(
             node_doc_bytes,
@@ -291,6 +295,16 @@ class EncryptionContext:
         parent = node.getparent()
         if type_attr == _TYPE_ENC_ELEMENT:
             # node is replaced by <EncryptedData> in its parent slot.
+            if template_path is not None:
+                if parent is None:
+                    # The document root itself was encrypted, so the
+                    # result root is the new <EncryptedData> element.
+                    new_enc = copy.deepcopy(new_tree.getroot())
+                    node.getroottree()._setroot(new_enc)
+                    return new_enc
+                _bridge.replace_in_place(node_root, new_tree.getroot())
+                return _bridge.locate(node_root.getroottree(), node_path)
+
             new_enc = copy.deepcopy(post_op)
             if parent is None:
                 # ``_setroot`` is lxml-private (leading underscore) but
@@ -303,7 +317,10 @@ class EncryptionContext:
             return new_enc
         else:
             # Type=Content: node stays, its content is replaced.
-            _bridge.replace_in_place(node, post_op)
+            if template_path is not None:
+                node = _bridge.replace_in_place_preserving_path(node_root, new_tree.getroot(), node_path)
+            else:
+                _bridge.replace_in_place(node, post_op)
             # Return the <EncryptedData> child of node.
             for child in node:
                 return child
@@ -330,7 +347,8 @@ class EncryptionContext:
 
         xml_bytes, base_url = _bridge.serialize(node)
         node_path = _bridge.structural_path(node)
-        kind, payload = self._impl._decrypt(xml_bytes, base_url, node_path)
+        id_specs = _bridge.expand_tree_id_specs(node.getroottree())
+        kind, payload = self._impl._decrypt(xml_bytes, base_url, node_path, id_specs)
         if kind == 'bytes':
             return payload
 

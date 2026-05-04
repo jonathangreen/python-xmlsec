@@ -52,10 +52,11 @@ def parse(data: bytes, base_url: str | None = None) -> _ElementTree:
 def structural_path(elem: _Element) -> List[int]:
     """Return the path from the document root to ``elem`` as a list of indexes.
 
-    Each index points into the parent's element-only children (lxml's
-    ``list(parent)`` semantics). An empty list means ``elem`` is the
-    document root. The path round-trips faithfully across serialize +
-    parse on both lxml and python-xmlsec's libxml2.
+    Each index points into the parent's element-only children; comments,
+    processing instructions, and text nodes are ignored to match the C
+    resolver. An empty list means ``elem`` is the document root. The path
+    round-trips faithfully across serialize + parse on both lxml and
+    python-xmlsec's libxml2.
     """
     path: List[int] = []
     cur = elem
@@ -63,7 +64,7 @@ def structural_path(elem: _Element) -> List[int]:
         parent = cur.getparent()
         if parent is None:
             break
-        path.insert(0, list(parent).index(cur))
+        path.insert(0, _element_children(parent).index(cur))
         cur = parent
     return path
 
@@ -72,8 +73,12 @@ def locate(tree: _ElementTree, path: List[int]) -> _Element:
     """Inverse of ``structural_path``."""
     cur = tree.getroot()
     for idx in path:
-        cur = list(cur)[idx]
+        cur = _element_children(cur)[idx]
     return cur
+
+
+def _element_children(elem: _Element) -> List[_Element]:
+    return [child for child in elem if isinstance(child.tag, str)]
 
 
 # Process-level registry populated by ``tree.add_ids``. Each entry is a
@@ -181,3 +186,35 @@ def replace_in_place(target: _Element, source: _Element) -> None:
         target.remove(child)
     for child in list(source):
         target.append(copy.deepcopy(child))
+
+
+def replace_in_place_preserving_path(target: _Element, source: _Element, preserve_path: List[int]) -> _Element:
+    """Mutate ``target`` to match ``source`` while preserving one descendant.
+
+    ``preserve_path`` uses the same element-only structural indexes as
+    ``structural_path``. The element at that path in ``target`` keeps its
+    Python identity, but its contents are updated from the corresponding
+    ``source`` element. All other descendants are replaced from ``source``.
+    """
+    if not preserve_path:
+        replace_in_place(target, source)
+        return target
+
+    preserve_idx = preserve_path[0]
+    target_child = _element_children(target)[preserve_idx]
+    source_child = _element_children(source)[preserve_idx]
+    preserved = replace_in_place_preserving_path(target_child, source_child, preserve_path[1:])
+
+    target.text = source.text
+    target.tail = source.tail
+    target.attrib.clear()
+    for k, v in source.attrib.items():
+        target.set(k, v)
+    for child in list(target):
+        target.remove(child)
+    for child in list(source):
+        if child is source_child:
+            target.append(target_child)
+        else:
+            target.append(copy.deepcopy(child))
+    return preserved

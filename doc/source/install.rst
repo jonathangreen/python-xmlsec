@@ -86,6 +86,43 @@ If you encounter the historical error on an older ``xmlsec`` release,
 upgrade to a release that includes the issue #356 fix.
 
 
+``libxml2 version mismatch: compiled against X.Y, loaded A.B``
+--------------------------------------------------------------
+
+This different (and rarer) error means the C extension was built
+against one ``libxml2`` but a *different* ``libxml2`` was loaded into
+the process at runtime. ``xmlsec1``'s public API is
+``libxml2``-tree-shaped — every operation takes ``xmlNodePtr`` /
+``xmlDocPtr`` — so the C extension *must* link against ``libxml2``,
+and the ``libxml2`` it calls must match the one ``xmlsec1`` itself
+was built against. When the two diverge, ``xmlAddID`` / ``xmlGetID``
+and similar calls write and read incompatible struct layouts.
+
+Common causes:
+
+* macOS dev with mixed prefixes: Homebrew has both ``libxml2`` and
+  ``libxmlsec1``, but the system ``libxml2`` (or a stale one in
+  ``/usr/local``) gets resolved first. Make sure
+  ``pkg-config xmlsec1 --libs`` and ``pkg-config libxml-2.0 --libs``
+  point at the same prefix.
+* Linux with ``libxmlsec1-dev`` from one distro and ``libxml2-dev``
+  from another channel (system + a third-party APT, conda, etc.).
+* Cross-built wheel picking up a different system ``libxml2`` than
+  the one bundled at build time.
+
+The cleanest fix for local development is to bundle a matched pair
+via the static-deps build, which compiles ``libxml2`` and ``xmlsec1``
+together from source so they cannot drift:
+
+.. code-block:: bash
+
+   PYXMLSEC_STATIC_DEPS=true pip install -e .
+
+For deployments, install ``xmlsec`` from the prebuilt wheel (which
+already bundles a matched pair) or rebuild against your current
+system ``libxml2``.
+
+
 Mac
 ---
 

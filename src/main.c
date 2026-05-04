@@ -18,6 +18,9 @@
 #include <xmlsec/base64.h>
 #include <xmlsec/io.h>
 
+#include <libxml/xmlversion.h>
+#include <libxml/parser.h>
+
 #define _PYXMLSEC_FREE_NONE 0
 #define _PYXMLSEC_FREE_XMLSEC 1
 #define _PYXMLSEC_FREE_CRYPTOLIB 2
@@ -55,7 +58,46 @@ static void PyXmlSec_Free(int what) {
     free_mode = _PYXMLSEC_FREE_NONE;
 }
 
+// Verify that the libxml2 we compiled against matches the libxml2 that
+// got loaded at runtime. xmlsec1 is fundamentally a libxml2 wrapper —
+// every public xmlsec API takes xmlNodePtr / xmlDocPtr — so our
+// bridge.c calls libxml2 directly, then hands the resulting nodes to
+// xmlsec1. If the two layers happen to bind to different libxml2
+// builds (different brew prefix vs. system libxml2-dev, mismatched
+// manylinux toolchain, etc.) the struct layouts diverge and operations
+// like xmlAddID / xmlGetID write and read incompatible fields. We
+// already statically guard xmlsec1's own ABI via xmlSecCheckVersion();
+// this adds the matching guard for the libxml2 underneath it.
+//
+// We compare major.minor only — within a libxml2 major.minor the layout
+// is stable; across them (e.g. 2.9 → 2.14) added struct fields make
+// pointer casts unsafe. This is the same check xmlsec1 does for
+// itself, just turned on the layer below.
+static int PyXmlSec_CheckLibxmlVersion(void) {
+    long runtime = PyOS_strtol(xmlParserVersion, NULL, 10);
+    long compile = LIBXML_VERSION;
+    long runtime_major = (runtime / 10000) % 100;
+    long compile_major = (compile / 10000) % 100;
+    long runtime_minor = (runtime / 100) % 100;
+    long compile_minor = (compile / 100) % 100;
+    if (runtime_major != compile_major || runtime_minor != compile_minor) {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+            "libxml2 version mismatch: compiled against %ld.%ld, loaded %ld.%ld. "
+            "Rebuild xmlsec from source against the loaded libxml2, or use "
+            "PYXMLSEC_STATIC_DEPS=true to bundle a matched pair.",
+            compile_major, compile_minor, runtime_major, runtime_minor);
+        PyErr_SetString(PyXmlSec_InternalError, msg);
+        return -1;
+    }
+    return 0;
+}
+
 static int PyXmlSec_Init(void) {
+    if (PyXmlSec_CheckLibxmlVersion() < 0) {
+        return -1;
+    }
+
     if (xmlSecInit() < 0) {
         PyXmlSec_SetLastError("cannot initialize xmlsec library.");
         PyXmlSec_Free(_PYXMLSEC_FREE_NONE);

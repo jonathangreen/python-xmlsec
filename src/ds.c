@@ -12,9 +12,10 @@
 #include "exception.h"
 #include "constants.h"
 #include "keys.h"
-#include "lxml.h"
+#include "bridge.h"
 
 #include <xmlsec/xmldsig.h>
+#include <libxml/tree.h>
 
 typedef struct {
     PyObject_HEAD
@@ -119,120 +120,105 @@ static int PyXmlSec_SignatureContextKeySet(PyObject* self, PyObject* value, void
     return 0;
 }
 
-static const char PyXmlSec_SignatureContextRegisterId__doc__[] = \
-    "register_id(node, id_attr = 'ID', id_ns = None) -> None\n"
-    "Registers new id.\n\n"
-    ":param node: the pointer to XML node\n"
-    ":type node: :class:`lxml.etree._Element`\n"
-    ":param id_attr: the attribute\n"
-    ":type id_attr: :class:`str`\n"
-    ":param id_ns: the namespace (optional)\n"
-    ":type id_ns: :class:`str` or :data:`None`";
-static PyObject* PyXmlSec_SignatureContextRegisterId(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "node", "id_attr", "id_ns", NULL};
+// _sign_doc(xml_bytes, base_url_or_none, sig_path, id_specs) -> bytes
+//
+// Bytes-based replacement for the old tree-taking SignatureContext.sign:
+// parse the document with python-xmlsec's libxml2, apply id specs onto
+// the parsed doc, sign at the structural path, serialize back to bytes.
+// xmlsec1 never sees an lxml-owned xmlNodePtr.
+static const char PyXmlSec_SignatureContext_SignDoc__doc__[] = \
+    "_sign_doc(xml_bytes, base_url, sig_path, id_specs) -> bytes\n"
+    "Internal: sign the Signature element at sig_path inside xml_bytes; return the modified document.\n";
+static PyObject* PyXmlSec_SignatureContext_SignDoc(PyObject* self, PyObject* args, PyObject* kwargs) {
+    static char *kwlist[] = { "xml_bytes", "base_url", "sig_path", "id_specs", NULL };
+    PyXmlSec_SignatureContext* ctx = (PyXmlSec_SignatureContext*)self;
+    const char* xml = NULL;
+    Py_ssize_t xml_len = 0;
+    PyObject* base_url_obj = NULL;
+    PyObject* sig_path = NULL;
+    PyObject* id_specs = NULL;
+    xmlDocPtr doc = NULL;
+    xmlNodePtr sig_node;
+    PyObject* result = NULL;
+    int rv;
+    const char* base_url = NULL;
 
-    PyXmlSec_LxmlElementPtr node = NULL;
-    const char* id_attr = "ID";
-    const char* id_ns = NULL;
-
-    xmlChar* name = NULL;
-    xmlAttrPtr attr;
-    xmlAttrPtr tmpAttr;
-
-    PYXMLSEC_DEBUGF("%p: register id - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&|sz:register_id", kwlist,
-        PyXmlSec_LxmlElementConverter, &node, &id_attr, &id_ns))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#OO!O!:_sign_doc", kwlist,
+        &xml, &xml_len, &base_url_obj,
+        &PyList_Type, &sig_path,
+        &PyList_Type, &id_specs))
     {
         goto ON_FAIL;
     }
-
-    if (id_ns != NULL) {
-        attr = xmlHasNsProp(node->_c_node, XSTR(id_attr), XSTR(id_ns));
-    } else {
-        attr = xmlHasProp(node->_c_node, XSTR(id_attr));
+    if (base_url_obj != Py_None) {
+        base_url = PyUnicode_AsUTF8(base_url_obj);
+        if (base_url == NULL) goto ON_FAIL;
     }
 
-    if (attr == NULL || attr->children == NULL) {
-        PyErr_SetString(PyXmlSec_Error, "missing attribute.");
-        goto ON_FAIL;
-    }
+    doc = pyxmlsec_load_doc(xml, xml_len, base_url);
+    if (doc == NULL) goto ON_FAIL;
 
-    name = xmlNodeListGetString(node->_c_node->doc, attr->children, 1);
-    tmpAttr = xmlGetID(node->_c_node->doc, name);
-    if (tmpAttr != attr) {
-        if (tmpAttr != NULL) {
-            PyErr_SetString(PyXmlSec_Error, "duplicated id.");
-            goto ON_FAIL;
-        }
+    if (pyxmlsec_apply_id_specs(doc, id_specs) < 0) goto ON_FAIL;
 
-        Py_BEGIN_ALLOW_THREADS;
-        xmlAddID(NULL, node->_c_node->doc, name, attr);
-        Py_END_ALLOW_THREADS;
-    }
-
-    xmlFree(name);
-    PYXMLSEC_DEBUGF("%p: register id - ok", self);
-    Py_RETURN_NONE;
-ON_FAIL:
-    xmlFree(name);
-    PYXMLSEC_DEBUGF("%p: register id - fail", self);
-    return NULL;
-}
-
-static const char PyXmlSec_SignatureContextSign__doc__[] = \
-    "sign(node) -> None\n"
-    "Signs according to the signature template.\n\n"
-    ":param node: the pointer to :xml:`<dsig:Signature/>` node with signature template\n"
-    ":type node: :class:`lxml.etree._Element`";
-static PyObject* PyXmlSec_SignatureContextSign(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "node", NULL};
-
-    PyXmlSec_SignatureContext* ctx = (PyXmlSec_SignatureContext*)self;
-    PyXmlSec_LxmlElementPtr node = NULL;
-    int rv;
-
-    PYXMLSEC_DEBUGF("%p: sign - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&:sign", kwlist, PyXmlSec_LxmlElementConverter, &node)) {
-        goto ON_FAIL;
-    }
+    sig_node = pyxmlsec_resolve_path(doc, sig_path);
+    if (sig_node == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecDSigCtxSign(ctx->handle, node->_c_node);
+    rv = xmlSecDSigCtxSign(ctx->handle, sig_node);
     PYXMLSEC_DUMP(xmlSecDSigCtxDebugDump, ctx->handle);
     Py_END_ALLOW_THREADS;
     if (rv < 0) {
         PyXmlSec_SetLastError("failed to sign");
         goto ON_FAIL;
     }
-    PYXMLSEC_DEBUGF("%p: sign - ok", self);
-    Py_RETURN_NONE;
+
+    result = pyxmlsec_dump_doc(doc);
 
 ON_FAIL:
-    PYXMLSEC_DEBUGF("%p: sign - fail", self);
-    return NULL;
+    if (doc != NULL) xmlFreeDoc(doc);
+    return result;
 }
 
-static const char PyXmlSec_SignatureContextVerify__doc__[] = \
-    "verify(node) -> None\n"
-    "Verifies according to the signature template.\n\n"
-    ":param node: the pointer with :xml:`<dsig:Signature/>` node\n"
-    ":type node: :class:`lxml.etree._Element`\n"
-    ":return: :data:`None` on success\n"
-    ":raise VerificationError: on failure\n";
-static PyObject* PyXmlSec_SignatureContextVerify(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "node", NULL};
-
+// _verify_doc(xml_bytes, base_url_or_none, sig_path, id_specs) -> None
+static const char PyXmlSec_SignatureContext_VerifyDoc__doc__[] = \
+    "_verify_doc(xml_bytes, base_url, sig_path, id_specs) -> None\n"
+    "Internal: verify the Signature element at sig_path inside xml_bytes; raise on failure.\n";
+static PyObject* PyXmlSec_SignatureContext_VerifyDoc(PyObject* self, PyObject* args, PyObject* kwargs) {
+    static char *kwlist[] = { "xml_bytes", "base_url", "sig_path", "id_specs", NULL };
     PyXmlSec_SignatureContext* ctx = (PyXmlSec_SignatureContext*)self;
-    PyXmlSec_LxmlElementPtr node = NULL;
+    const char* xml = NULL;
+    Py_ssize_t xml_len = 0;
+    PyObject* base_url_obj = NULL;
+    PyObject* sig_path = NULL;
+    PyObject* id_specs = NULL;
+    xmlDocPtr doc = NULL;
+    xmlNodePtr sig_node;
     int rv;
+    int ok = 0;
+    const char* base_url = NULL;
 
-    PYXMLSEC_DEBUGF("%p: verify - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&:verify", kwlist, PyXmlSec_LxmlElementConverter, &node)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#OO!O!:_verify_doc", kwlist,
+        &xml, &xml_len, &base_url_obj,
+        &PyList_Type, &sig_path,
+        &PyList_Type, &id_specs))
+    {
         goto ON_FAIL;
     }
+    if (base_url_obj != Py_None) {
+        base_url = PyUnicode_AsUTF8(base_url_obj);
+        if (base_url == NULL) goto ON_FAIL;
+    }
+
+    doc = pyxmlsec_load_doc(xml, xml_len, base_url);
+    if (doc == NULL) goto ON_FAIL;
+
+    if (pyxmlsec_apply_id_specs(doc, id_specs) < 0) goto ON_FAIL;
+
+    sig_node = pyxmlsec_resolve_path(doc, sig_path);
+    if (sig_node == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecDSigCtxVerify(ctx->handle, node->_c_node);
+    rv = xmlSecDSigCtxVerify(ctx->handle, sig_node);
     PYXMLSEC_DUMP(xmlSecDSigCtxDebugDump, ctx->handle);
     Py_END_ALLOW_THREADS;
 
@@ -244,11 +230,12 @@ static PyObject* PyXmlSec_SignatureContextVerify(PyObject* self, PyObject* args,
         PyErr_SetString(PyXmlSec_VerificationError, "Signature is invalid.");
         goto ON_FAIL;
     }
-    PYXMLSEC_DEBUGF("%p: verify - ok", self);
-    Py_RETURN_NONE;
+    ok = 1;
+
 ON_FAIL:
-    PYXMLSEC_DEBUGF("%p: verify - fail", self);
-    return NULL;
+    if (doc != NULL) xmlFreeDoc(doc);
+    if (!ok) return NULL;
+    Py_RETURN_NONE;
 }
 
 // common helper for operations binary_verify and binary_sign
@@ -530,22 +517,16 @@ static PyGetSetDef PyXmlSec_SignatureContextGetSet[] = {
 
 static PyMethodDef PyXmlSec_SignatureContextMethods[] = {
     {
-        "register_id",
-        (PyCFunction)PyXmlSec_SignatureContextRegisterId,
+        "_sign_doc",
+        (PyCFunction)PyXmlSec_SignatureContext_SignDoc,
         METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_SignatureContextRegisterId__doc__,
+        PyXmlSec_SignatureContext_SignDoc__doc__,
     },
     {
-        "sign",
-        (PyCFunction)PyXmlSec_SignatureContextSign,
+        "_verify_doc",
+        (PyCFunction)PyXmlSec_SignatureContext_VerifyDoc,
         METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_SignatureContextSign__doc__
-    },
-    {
-        "verify",
-        (PyCFunction)PyXmlSec_SignatureContextVerify,
-        METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_SignatureContextVerify__doc__
+        PyXmlSec_SignatureContext_VerifyDoc__doc__,
     },
     {
         "sign_binary",

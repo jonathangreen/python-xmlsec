@@ -18,12 +18,33 @@ from typing import Iterable
 from lxml import etree
 from lxml.etree import _Element
 
-from xmlsec import _impl
+from xmlsec import _bridge, _impl
 
 _consts = _impl.constants
-add_ids = _impl.tree.add_ids  # re-export the C implementation unchanged
 
 __all__ = ['add_ids', 'find_child', 'find_node', 'find_parent']
+
+
+def add_ids(node: _Element, ids):
+    """Register ``ids`` as XML id attribute names used below ``node``.
+
+    Mirrors libxmlsec's ``xmlSecAddIDs``: every descendant of ``node``
+    that carries one of the named attributes is registered as an id at
+    the next sign/verify (or encrypt/decrypt) call. The actual
+    ``xmlAddID`` call lands inside python-xmlsec's libxml2 on the doc
+    parsed from the user's serialized bytes — no lxml-owned xmlNodePtr
+    is dereferenced.
+
+    The full migration (including pruning of stale entries) lands in a
+    later PR; for now this is a thin record-only registration.
+    """
+    if not etree.iselement(node):
+        raise TypeError('node must be lxml.etree._Element')
+    try:
+        attr_names = [str(x) for x in ids]
+    except TypeError as exc:
+        raise TypeError('ids must be a sequence of strings') from exc
+    _bridge.add_id_registration(node, attr_names)
 
 
 def _qname(name: str, namespace: str) -> str:

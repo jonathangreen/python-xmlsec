@@ -50,9 +50,10 @@ class build_ext(build_ext_orig):
             ext.library_dirs.extend(config['library_dirs'])
             ext.libraries.extend(config['libraries'])
 
-        import lxml
-
-        ext.include_dirs.extend(lxml.get_include())
+        # The C extension no longer touches lxml's libxml2 nodes (issue #356);
+        # it parses XML purely with its own libxml2 and exchanges bytes with
+        # the Python wrapper. lxml C headers are no longer required at build
+        # time. The runtime ``lxml>=3.8`` dependency in pyproject.toml stays.
 
         ext.define_macros.extend(
             [

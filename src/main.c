@@ -10,7 +10,7 @@
 #include "common.h"
 #include "platform.h"
 #include "exception.h"
-#include "lxml.h"
+#include "version.h"
 
 #include <xmlsec/xmlsec.h>
 #include <xmlsec/crypto.h>
@@ -477,8 +477,6 @@ static PyMethodDef PyXmlSec_MainMethods[] = {
 };
 
 // modules entry points
-// loads lxml module
-int PyXmlSec_InitLxmlModule(void);
 // constants
 int PyXmlSec_ConstantsModule_Init(PyObject* package);
 // exceptions
@@ -528,7 +526,6 @@ PYENTRY_FUNC_NAME(void)
 
     if (PyModule_AddStringConstant(module, "__version__", STRINGIFY(MODULE_VERSION)) < 0) goto ON_FAIL;
 
-    if (PyXmlSec_InitLxmlModule() < 0) goto ON_FAIL;
     /* Populate final object settings */
     if (PyXmlSec_ConstantsModule_Init(module) < 0) goto ON_FAIL;
     if (PyXmlSec_KeyModule_Init(module) < 0) goto ON_FAIL;

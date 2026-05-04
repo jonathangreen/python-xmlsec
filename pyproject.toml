@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "setuptools_scm>=8", "pkgconfig>=1.5.1", "lxml>=3.8"]
+requires = ["setuptools", "wheel", "setuptools_scm>=8", "pkgconfig>=1.5.1"]
 
 [project]
 name = "xmlsec"

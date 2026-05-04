@@ -12,10 +12,12 @@
 #include "exception.h"
 #include "constants.h"
 #include "keys.h"
+#include "bridge.h"
 #include "lxml.h"
 
 #include <xmlsec/xmlenc.h>
 #include <xmlsec/xmltree.h>
+#include <libxml/tree.h>
 
 // Backwards compatibility with xmlsec 1.2
 #ifndef XMLSEC_KEYINFO_FLAGS_LAX_KEY_SEARCH
@@ -149,48 +151,198 @@ static PyObject* PyXmlSec_EncryptionContextReset(PyObject* self, PyObject* args,
     Py_RETURN_NONE;
 }
 
-static const char PyXmlSec_EncryptionContextEncryptBinary__doc__[] = \
-    "encrypt_binary(template, data) -> lxml.etree._Element\n"
-    "Encrypts binary ``data`` according to ``EncryptedData`` template ``template``.\n\n"
-    ".. note:: ``template`` is modified in place.\n\n"
-    ":param template: the pointer to :xml:`<enc:EncryptedData/>` template node\n"
-    ":type template: :class:`lxml.etree._Element`\n"
-    ":param data: the data\n"
-    ":type data: :class:`bytes`\n"
-    ":return: the resulting :xml:`<enc:EncryptedData/>` subtree\n"
-    ":rtype: :class:`lxml.etree._Element`";
-static PyObject* PyXmlSec_EncryptionContextEncryptBinary(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "template", "data", NULL};
-
+// _encrypt_binary(template_bytes, data) -> bytes
+//
+// Round-trips a single template fragment: parse, run
+// xmlSecEncCtxBinaryEncrypt on its root, serialize back.
+static const char PyXmlSec_EncryptionContext_EncryptBinary__doc__[] = \
+    "_encrypt_binary(template_bytes, data) -> bytes\n"
+    "Internal: encrypt binary data into a fragment-shaped EncryptedData template.\n";
+static PyObject* PyXmlSec_EncryptionContext_EncryptBinary(PyObject* self, PyObject* args, PyObject* kwargs) {
+    static char *kwlist[] = { "template_bytes", "data", NULL };
     PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
-    PyXmlSec_LxmlElementPtr template = NULL;
+    const char* tmpl = NULL;
+    Py_ssize_t tmpl_len = 0;
     const char* data = NULL;
     Py_ssize_t data_size = 0;
+    xmlDocPtr doc = NULL;
+    xmlNodePtr template_root;
+    PyObject* result = NULL;
     int rv;
 
-    PYXMLSEC_DEBUGF("%p: encrypt_binary - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&s#:encrypt_binary", kwlist,
-        PyXmlSec_LxmlElementConverter, &template, &data, &data_size))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#y#:_encrypt_binary", kwlist,
+        &tmpl, &tmpl_len, &data, &data_size))
     {
         goto ON_FAIL;
     }
 
+    doc = pyxmlsec_load_doc(tmpl, tmpl_len, NULL);
+    if (doc == NULL) goto ON_FAIL;
+    template_root = xmlDocGetRootElement(doc);
+    if (template_root == NULL) {
+        PyErr_SetString(PyXmlSec_Error, "template fragment has no root element");
+        goto ON_FAIL;
+    }
+
     Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecEncCtxBinaryEncrypt(ctx->handle, template->_c_node, (const xmlSecByte*)data, (xmlSecSize)data_size);
+    rv = xmlSecEncCtxBinaryEncrypt(ctx->handle, template_root, (const xmlSecByte*)data, (xmlSecSize)data_size);
     PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
     Py_END_ALLOW_THREADS;
-
     if (rv < 0) {
         PyXmlSec_SetLastError("failed to encrypt binary");
         goto ON_FAIL;
     }
-    Py_INCREF(template);
-    PYXMLSEC_DEBUGF("%p: encrypt_binary - ok", self);
 
-    return (PyObject*)template;
+    result = pyxmlsec_dump_doc(doc);
+
 ON_FAIL:
-    PYXMLSEC_DEBUGF("%p: encrypt_binary - fail", self);
-    return NULL;
+    if (doc != NULL) xmlFreeDoc(doc);
+    return result;
+}
+
+// _encrypt_uri(template_bytes, uri) -> bytes
+static const char PyXmlSec_EncryptionContext_EncryptUri__doc__[] = \
+    "_encrypt_uri(template_bytes, uri) -> bytes\n"
+    "Internal: encrypt the contents of ``uri`` into a fragment-shaped EncryptedData template.\n";
+static PyObject* PyXmlSec_EncryptionContext_EncryptUri(PyObject* self, PyObject* args, PyObject* kwargs) {
+    static char *kwlist[] = { "template_bytes", "uri", NULL };
+    PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
+    const char* tmpl = NULL;
+    Py_ssize_t tmpl_len = 0;
+    const char* uri = NULL;
+    xmlDocPtr doc = NULL;
+    xmlNodePtr template_root;
+    PyObject* result = NULL;
+    int rv;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#s:_encrypt_uri", kwlist,
+        &tmpl, &tmpl_len, &uri))
+    {
+        goto ON_FAIL;
+    }
+
+    doc = pyxmlsec_load_doc(tmpl, tmpl_len, NULL);
+    if (doc == NULL) goto ON_FAIL;
+    template_root = xmlDocGetRootElement(doc);
+    if (template_root == NULL) {
+        PyErr_SetString(PyXmlSec_Error, "template fragment has no root element");
+        goto ON_FAIL;
+    }
+
+    Py_BEGIN_ALLOW_THREADS;
+    rv = xmlSecEncCtxUriEncrypt(ctx->handle, template_root, (const xmlSecByte*)uri);
+    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
+    Py_END_ALLOW_THREADS;
+    if (rv < 0) {
+        PyXmlSec_SetLastError("failed to encrypt URI");
+        goto ON_FAIL;
+    }
+
+    result = pyxmlsec_dump_doc(doc);
+
+ON_FAIL:
+    if (doc != NULL) xmlFreeDoc(doc);
+    return result;
+}
+
+// _encrypt_xml(node_doc_bytes, base_url_or_none, template_path_or_none,
+//              node_path, template_bytes_or_none) -> bytes
+//
+// Mirrors the existing C version: when template_path is set the template
+// already lives inside node_doc_bytes (same-tree), and we resolve it via
+// the path. When template_bytes is set, the template lives in a
+// standalone fragment that we parse separately and copy into node's doc
+// via xmlDocCopyNode (matches src/enc.c:264 logic). Exactly one of the
+// two must be non-None.
+static const char PyXmlSec_EncryptionContext_EncryptXml__doc__[] = \
+    "_encrypt_xml(node_doc_bytes, base_url, template_path, node_path, template_bytes) -> bytes\n"
+    "Internal: encrypt node at node_path inside node_doc_bytes using the template (attached or detached).\n";
+static PyObject* PyXmlSec_EncryptionContext_EncryptXml(PyObject* self, PyObject* args, PyObject* kwargs) {
+    static char *kwlist[] = { "node_doc_bytes", "base_url", "template_path", "node_path", "template_bytes", NULL };
+    PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
+    const char* xml = NULL;
+    Py_ssize_t xml_len = 0;
+    PyObject* base_url_obj = NULL;
+    PyObject* template_path = NULL;
+    PyObject* node_path = NULL;
+    PyObject* template_bytes_obj = NULL;
+    xmlDocPtr node_doc = NULL;
+    xmlDocPtr tmpl_doc = NULL;
+    xmlNodePtr tmpl_node = NULL;
+    xmlNodePtr copied = NULL;
+    xmlNodePtr node = NULL;
+    PyObject* result = NULL;
+    const char* base_url = NULL;
+    int rv;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#OOOO:_encrypt_xml", kwlist,
+        &xml, &xml_len, &base_url_obj, &template_path, &node_path, &template_bytes_obj))
+    {
+        goto ON_FAIL;
+    }
+    if (base_url_obj != Py_None) {
+        base_url = PyUnicode_AsUTF8(base_url_obj);
+        if (base_url == NULL) goto ON_FAIL;
+    }
+
+    node_doc = pyxmlsec_load_doc(xml, xml_len, base_url);
+    if (node_doc == NULL) goto ON_FAIL;
+
+    node = pyxmlsec_resolve_path(node_doc, node_path);
+    if (node == NULL) goto ON_FAIL;
+
+    if (template_bytes_obj != Py_None) {
+        // Detached template: parse the standalone fragment and copy its
+        // root into the node's doc. Mirrors xmlDocCopyNode at the old
+        // src/enc.c:264.
+        const char* tmpl_xml = NULL;
+        Py_ssize_t tmpl_len = 0;
+        if (PyBytes_AsStringAndSize(template_bytes_obj, (char**)&tmpl_xml, &tmpl_len) < 0) goto ON_FAIL;
+        tmpl_doc = pyxmlsec_load_doc(tmpl_xml, tmpl_len, NULL);
+        if (tmpl_doc == NULL) goto ON_FAIL;
+        xmlNodePtr tmpl_root = xmlDocGetRootElement(tmpl_doc);
+        if (tmpl_root == NULL) {
+            PyErr_SetString(PyXmlSec_Error, "template fragment has no root element");
+            goto ON_FAIL;
+        }
+        copied = xmlDocCopyNode(tmpl_root, node_doc, 1);
+        if (copied == NULL) {
+            PyErr_SetString(PyXmlSec_InternalError, "could not copy template tree");
+            goto ON_FAIL;
+        }
+        tmpl_node = copied;
+    } else if (template_path != Py_None) {
+        // Attached template: resolve its path inside node_doc.
+        tmpl_node = pyxmlsec_resolve_path(node_doc, template_path);
+        if (tmpl_node == NULL) goto ON_FAIL;
+    } else {
+        PyErr_SetString(PyExc_TypeError, "_encrypt_xml requires either template_path or template_bytes");
+        goto ON_FAIL;
+    }
+
+    Py_BEGIN_ALLOW_THREADS;
+    rv = xmlSecEncCtxXmlEncrypt(ctx->handle, tmpl_node, node);
+    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
+    Py_END_ALLOW_THREADS;
+    if (rv < 0) {
+        if (copied != NULL) {
+            // xmlsec attaches `copied` into the doc on success; on failure it
+            // was either freed already or still detached. Be defensive.
+            // (xmlSecEncCtxXmlEncrypt's docs are unclear; in practice freeing
+            // here is safe because copied was never inserted.)
+            xmlFreeNode(copied);
+            copied = NULL;
+        }
+        PyXmlSec_SetLastError("failed to encrypt xml");
+        goto ON_FAIL;
+    }
+
+    result = pyxmlsec_dump_doc(node_doc);
+
+ON_FAIL:
+    if (tmpl_doc != NULL) xmlFreeDoc(tmpl_doc);
+    if (node_doc != NULL) xmlFreeDoc(node_doc);
+    return result;
 }
 
 // release the replaced nodes in a way safe for `lxml`
@@ -212,132 +364,6 @@ static void PyXmlSec_ClearReplacedNodes(xmlSecEncCtxPtr ctx, PyXmlSec_LxmlDocume
         n = nn;
     }
     ctx->replacedNodeList = NULL;
-}
-
-static const char PyXmlSec_EncryptionContextEncryptXml__doc__[] = \
-    "encrypt_xml(template, node) -> lxml.etree._Element\n"
-    "Encrypts ``node`` using ``template``.\n\n"
-    ".. note:: The ``\"Type\"`` attribute of ``template`` decides whether ``node`` itself "
-    "(``http://www.w3.org/2001/04/xmlenc#Element``) or its content (``http://www.w3.org/2001/04/xmlenc#Content``) is encrypted.\n"
-    "   It must have one of these two values (or an exception is raised).\n"
-    "   The operation modifies the tree and removes replaced nodes.\n\n"
-    ":param template: the pointer to :xml:`<enc:EncryptedData/>` template node\n\n"
-    ":type template: :class:`lxml.etree._Element`\n"
-    ":param node: the pointer to node for encryption\n\n"
-    ":type node: :class:`lxml.etree._Element`\n"
-    ":return: the pointer to newly created :xml:`<enc:EncryptedData/>` node\n"
-    ":rtype: :class:`lxml.etree._Element`";
-static PyObject* PyXmlSec_EncryptionContextEncryptXml(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "template", "node", NULL};
-
-    PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
-    PyXmlSec_LxmlElementPtr template = NULL;
-    PyXmlSec_LxmlElementPtr node = NULL;
-    xmlNodePtr xnew_node = NULL;
-    xmlChar* tmpType = NULL;
-    int rv = 0;
-
-    PYXMLSEC_DEBUGF("%p: encrypt_xml - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&O&:encrypt_xml", kwlist,
-        PyXmlSec_LxmlElementConverter, &template, PyXmlSec_LxmlElementConverter, &node))
-    {
-        goto ON_FAIL;
-    }
-    tmpType = xmlGetProp(template->_c_node, XSTR("Type"));
-    if (tmpType == NULL || !(xmlStrEqual(tmpType, xmlSecTypeEncElement) || xmlStrEqual(tmpType, xmlSecTypeEncContent))) {
-        PyErr_SetString(PyXmlSec_Error, "unsupported `Type`, it should be `element` or `content`");
-        goto ON_FAIL;
-    }
-
-    // `xmlSecEncCtxXmlEncrypt` will replace the subtree rooted
-    //  at `node._c_node` or its children by an extended subtree rooted at "c_node".
-    //  We set `XMLSEC_ENC_RETURN_REPLACED_NODE` to prevent deallocation
-    //  of the replaced node. This is important as `node` is still referencing it
-    ctx->handle->flags = XMLSEC_ENC_RETURN_REPLACED_NODE;
-
-    // try to do all actions whithin single python-free section
-    // rv has the following codes, 1 - failed to copy node, -1 - op failed, 0 - success
-    Py_BEGIN_ALLOW_THREADS;
-    if (template->_doc->_c_doc != node->_doc->_c_doc) {
-        // `xmlSecEncCtxEncrypt` expects *template* to belong to the document of *node*
-        // if this is not the case, we copy the `libxml2` subtree there.
-        xnew_node = xmlDocCopyNode(template->_c_node, node->_doc->_c_doc, 1); // recursive
-        if (xnew_node == NULL) {
-            rv = 1;
-        }
-    }
-    if (rv == 0 && xmlSecEncCtxXmlEncrypt(ctx->handle, xnew_node != NULL ? xnew_node: template->_c_node, node->_c_node) < 0) {
-        rv = -1;
-        if (xnew_node != NULL) {
-            xmlFreeNode(xnew_node);
-            xnew_node = NULL;
-        }
-    }
-    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
-    Py_END_ALLOW_THREADS;
-
-    PyXmlSec_ClearReplacedNodes(ctx->handle, node->_doc);
-    if (NULL != PyErr_Occurred()) {
-        goto ON_FAIL;
-    }
-
-    if (rv != 0) {
-        if (rv > 0) {
-            PyErr_SetString(PyXmlSec_InternalError, "could not copy template tree");
-        } else {
-            PyXmlSec_SetLastError("failed to encrypt xml");
-        }
-        goto ON_FAIL;
-    }
-
-    xmlFree(tmpType);
-
-    PYXMLSEC_DEBUGF("%p: encrypt_xml - ok", self);
-    return (PyObject*)PyXmlSec_elementFactory(node->_doc, xnew_node != NULL ? xnew_node : template->_c_node);
-ON_FAIL:
-    PYXMLSEC_DEBUGF("%p: encrypt_xml - fail", self);
-    xmlFree(tmpType);
-    return NULL;
-}
-
-static const char PyXmlSec_EncryptionContextEncryptUri__doc__[] = \
-    "encrypt_uri(template, uri) -> lxml.etree._Element\n"
-    "Encrypts binary data obtained from ``uri`` according to ``template``.\n\n"
-    ".. note:: ``template`` is modified in place.\n\n"
-    ":param template: the pointer to :xml:`<enc:EncryptedData/>` template node\n"
-    ":type template: :class:`lxml.etree._Element`\n"
-    ":param uri: the URI\n"
-    ":type uri: :class:`str`\n"
-    ":return: the resulting :xml:`<enc:EncryptedData/>` subtree\n"
-    ":rtype: :class:`lxml.etree._Element`";
-static PyObject* PyXmlSec_EncryptionContextEncryptUri(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "template", "uri", NULL};
-
-    PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
-    PyXmlSec_LxmlElementPtr template = NULL;
-    const char* uri = NULL;
-    int rv;
-
-    PYXMLSEC_DEBUGF("%p: encrypt_uri - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&s:encrypt_uri", kwlist, PyXmlSec_LxmlElementConverter, &template, &uri)) {
-        goto ON_FAIL;
-    }
-
-    Py_BEGIN_ALLOW_THREADS;
-    rv = xmlSecEncCtxUriEncrypt(ctx->handle, template->_c_node, (const xmlSecByte*)uri);
-    PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
-    Py_END_ALLOW_THREADS;
-
-    if (rv < 0) {
-        PyXmlSec_SetLastError("failed to encrypt URI");
-        goto ON_FAIL;
-    }
-    PYXMLSEC_DEBUGF("%p: encrypt_uri - ok", self);
-    Py_INCREF(template);
-    return (PyObject*)template;
-ON_FAIL:
-    PYXMLSEC_DEBUGF("%p: encrypt_uri - fail", self);
-    return NULL;
 }
 
 static const char PyXmlSec_EncryptionContextDecrypt__doc__[] = \
@@ -468,22 +494,22 @@ static PyMethodDef PyXmlSec_EncryptionContextMethods[] = {
         PyXmlSec_EncryptionContextReset__doc__,
     },
     {
-        "encrypt_binary",
-        (PyCFunction)PyXmlSec_EncryptionContextEncryptBinary,
+        "_encrypt_binary",
+        (PyCFunction)PyXmlSec_EncryptionContext_EncryptBinary,
         METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_EncryptionContextEncryptBinary__doc__,
+        PyXmlSec_EncryptionContext_EncryptBinary__doc__,
     },
     {
-        "encrypt_xml",
-        (PyCFunction)PyXmlSec_EncryptionContextEncryptXml,
+        "_encrypt_xml",
+        (PyCFunction)PyXmlSec_EncryptionContext_EncryptXml,
         METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_EncryptionContextEncryptXml__doc__
+        PyXmlSec_EncryptionContext_EncryptXml__doc__,
     },
     {
-        "encrypt_uri",
-        (PyCFunction)PyXmlSec_EncryptionContextEncryptUri,
+        "_encrypt_uri",
+        (PyCFunction)PyXmlSec_EncryptionContext_EncryptUri,
         METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_EncryptionContextEncryptUri__doc__
+        PyXmlSec_EncryptionContext_EncryptUri__doc__,
     },
     {
         "decrypt",

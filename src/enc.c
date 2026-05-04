@@ -13,7 +13,6 @@
 #include "constants.h"
 #include "keys.h"
 #include "bridge.h"
-#include "lxml.h"
 
 #include <xmlsec/xmlenc.h>
 #include <xmlsec/xmltree.h>
@@ -345,84 +344,52 @@ ON_FAIL:
     return result;
 }
 
-// release the replaced nodes in a way safe for `lxml`
-static void PyXmlSec_ClearReplacedNodes(xmlSecEncCtxPtr ctx, PyXmlSec_LxmlDocumentPtr doc) {
-    PyXmlSec_LxmlElementPtr elem;
-    // release the replaced nodes in a way safe for `lxml`
-    xmlNodePtr n = ctx->replacedNodeList;
-    xmlNodePtr nn;
-
-    while (n != NULL) {
-        PYXMLSEC_DEBUGF("clear replaced node %p", n);
-        nn = n->next;
-        // if n has references, it will not be deleted
-        elem = (PyXmlSec_LxmlElementPtr)PyXmlSec_elementFactory(doc, n);
-        if (NULL == elem)
-            xmlFreeNode(n);
-        else
-            Py_DECREF(elem);
-        n = nn;
-    }
-    ctx->replacedNodeList = NULL;
-}
-
-static const char PyXmlSec_EncryptionContextDecrypt__doc__[] = \
-    "decrypt(node)\n"
-    "Decrypts ``node`` (an ``EncryptedData`` or ``EncryptedKey`` element) and returns the result. "
-    "The decryption may result in binary data or an XML subtree. "
-    "In the former case, the binary data is returned. In the latter case, "
-    "the input tree is modified and a reference to the decrypted XML subtree is returned.\n"
-    "If the operation modifies the tree, it removes replaced nodes.\n\n"
-    ":param node: the pointer to :xml:`<enc:EncryptedData/>` or :xml:`<enc:EncryptedKey/>` node\n"
-    ":type node: :class:`lxml.etree._Element`\n"
-    ":return: depends on input parameters\n"
-    ":rtype: :class:`lxml.etree._Element` or :class:`bytes`";
-static PyObject* PyXmlSec_EncryptionContextDecrypt(PyObject* self, PyObject* args, PyObject* kwargs) {
-    static char *kwlist[] = { "node", NULL};
-
+// _decrypt(xml_bytes, base_url_or_none, node_path) -> ("bytes", payload) | ("xml", new_doc_bytes)
+//
+// Bytes-based replacement for the old tree-taking decrypt: parse with
+// python-xmlsec's libxml2, run xmlSecEncCtxDecrypt at node_path, and
+// return a tagged tuple. The Python wrapper splices the result back
+// into the user's lxml tree.
+static const char PyXmlSec_EncryptionContext_Decrypt__doc__[] = \
+    "_decrypt(xml_bytes, base_url, node_path) -> (kind, payload)\n"
+    "Internal: decrypt the EncryptedData/EncryptedKey at node_path.\n"
+    "kind is 'bytes' (payload is the decrypted bytes) or 'xml' (payload is the modified doc bytes).\n";
+static PyObject* PyXmlSec_EncryptionContext_Decrypt(PyObject* self, PyObject* args, PyObject* kwargs) {
+    static char *kwlist[] = { "xml_bytes", "base_url", "node_path", NULL };
     PyXmlSec_EncryptionContext* ctx = (PyXmlSec_EncryptionContext*)self;
-    PyXmlSec_LxmlElementPtr node = NULL;
-
-    PyObject* node_num = NULL;
-    PyObject* parent = NULL;
-
-    PyObject* tmp;
-    xmlNodePtr root;
-    xmlNodePtr xparent;
+    const char* xml = NULL;
+    Py_ssize_t xml_len = 0;
+    PyObject* base_url_obj = NULL;
+    PyObject* node_path = NULL;
+    xmlDocPtr doc = NULL;
+    xmlNodePtr node;
+    PyObject* result = NULL;
+    const char* base_url = NULL;
     int rv;
-    xmlChar* ttype;
-    int notContent;
 
-    PYXMLSEC_DEBUGF("%p: decrypt - start", self);
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&:decrypt", kwlist, PyXmlSec_LxmlElementConverter, &node)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y#OO!:_decrypt", kwlist,
+        &xml, &xml_len, &base_url_obj, &PyList_Type, &node_path))
+    {
         goto ON_FAIL;
     }
-
-    xparent = node->_c_node->parent;
-    if (xparent != NULL && !PyXmlSec_IsElement(xparent)) {
-        xparent = NULL;
+    if (base_url_obj != Py_None) {
+        base_url = PyUnicode_AsUTF8(base_url_obj);
+        if (base_url == NULL) goto ON_FAIL;
     }
 
-    if (xparent != NULL) {
-        parent = (PyObject*)PyXmlSec_elementFactory(node->_doc, xparent);
-        if (parent == NULL) {
-            PyErr_SetString(PyXmlSec_InternalError, "failed to construct parent");
-            goto ON_FAIL;
-        }
-        // get index of node
-        node_num = PyObject_CallMethod(parent, "index", "O", node);
-        PYXMLSEC_DEBUGF("parent: %p, %p", parent, node_num);
-    }
+    doc = pyxmlsec_load_doc(xml, xml_len, base_url);
+    if (doc == NULL) goto ON_FAIL;
+
+    node = pyxmlsec_resolve_path(doc, node_path);
+    if (node == NULL) goto ON_FAIL;
 
     Py_BEGIN_ALLOW_THREADS;
-    ctx->handle->flags = XMLSEC_ENC_RETURN_REPLACED_NODE;
-    ctx->handle->mode = xmlSecCheckNodeName(node->_c_node, xmlSecNodeEncryptedKey, xmlSecEncNs) ? xmlEncCtxModeEncryptedKey : xmlEncCtxModeEncryptedData;
-    PYXMLSEC_DEBUGF("mode: %d", ctx->handle->mode);
-    rv = xmlSecEncCtxDecrypt(ctx->handle, node->_c_node);
+    ctx->handle->mode = xmlSecCheckNodeName(node, xmlSecNodeEncryptedKey, xmlSecEncNs)
+        ? xmlEncCtxModeEncryptedKey
+        : xmlEncCtxModeEncryptedData;
+    rv = xmlSecEncCtxDecrypt(ctx->handle, node);
     PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
     Py_END_ALLOW_THREADS;
-
-    PyXmlSec_ClearReplacedNodes(ctx->handle, node->_doc);
 
     if (rv < 0) {
         PyXmlSec_SetLastError("failed to decrypt");
@@ -430,49 +397,24 @@ static PyObject* PyXmlSec_EncryptionContextDecrypt(PyObject* self, PyObject* arg
     }
 
     if (!ctx->handle->resultReplaced) {
-        Py_XDECREF(node_num);
-        Py_XDECREF(parent);
-        PYXMLSEC_DEBUGF("%p: binary.decrypt - ok", self);
-        return PyBytes_FromStringAndSize(
+        // Binary decryption: return ("bytes", payload).
+        PyObject* payload = PyBytes_FromStringAndSize(
             (const char*)xmlSecBufferGetData(ctx->handle->result),
-            (Py_ssize_t)xmlSecBufferGetSize(ctx->handle->result)
-        );
+            (Py_ssize_t)xmlSecBufferGetSize(ctx->handle->result));
+        if (payload == NULL) goto ON_FAIL;
+        result = Py_BuildValue("(sO)", "bytes", payload);
+        Py_DECREF(payload);
+    } else {
+        // XML decryption: serialize the modified doc and return ("xml", bytes).
+        PyObject* payload = pyxmlsec_dump_doc(doc);
+        if (payload == NULL) goto ON_FAIL;
+        result = Py_BuildValue("(sO)", "xml", payload);
+        Py_DECREF(payload);
     }
-
-    if (xparent != NULL) {
-        ttype = xmlGetProp(node->_c_node, XSTR("Type"));
-        notContent = (ttype == NULL || !xmlStrEqual(ttype, xmlSecTypeEncContent));
-        xmlFree(ttype);
-
-        if (notContent) {
-            tmp = PyObject_GetItem(parent, node_num);
-            if (tmp == NULL) goto ON_FAIL;
-            Py_DECREF(parent);
-            parent = tmp;
-        }
-        Py_DECREF(node_num);
-        PYXMLSEC_DEBUGF("%p: parent.decrypt - ok", self);
-        return parent;
-    }
-
-    // root has been replaced
-    root = xmlDocGetRootElement(node->_doc->_c_doc);
-    if (root == NULL) {
-        PyErr_SetString(PyXmlSec_Error, "decryption resulted in a non well formed document");
-        goto ON_FAIL;
-    }
-
-    Py_XDECREF(node_num);
-    Py_XDECREF(parent);
-
-    PYXMLSEC_DEBUGF("%p: decrypt - ok", self);
-    return (PyObject*)PyXmlSec_elementFactory(node->_doc, root);
 
 ON_FAIL:
-    PYXMLSEC_DEBUGF("%p: decrypt - fail", self);
-    Py_XDECREF(node_num);
-    Py_XDECREF(parent);
-    return NULL;
+    if (doc != NULL) xmlFreeDoc(doc);
+    return result;
 }
 
 static PyGetSetDef PyXmlSec_EncryptionContextGetSet[] = {
@@ -512,10 +454,10 @@ static PyMethodDef PyXmlSec_EncryptionContextMethods[] = {
         PyXmlSec_EncryptionContext_EncryptUri__doc__,
     },
     {
-        "decrypt",
-        (PyCFunction)PyXmlSec_EncryptionContextDecrypt,
+        "_decrypt",
+        (PyCFunction)PyXmlSec_EncryptionContext_Decrypt,
         METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_EncryptionContextDecrypt__doc__
+        PyXmlSec_EncryptionContext_Decrypt__doc__,
     },
     {NULL, NULL} /* sentinel */
 };

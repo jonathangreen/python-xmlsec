@@ -485,8 +485,6 @@ int PyXmlSec_ConstantsModule_Init(PyObject* package);
 int PyXmlSec_ExceptionsModule_Init(PyObject* package);
 // keys management
 int PyXmlSec_KeyModule_Init(PyObject* package);
-// init lxml.tree integration
-int PyXmlSec_TreeModule_Init(PyObject* package);
 // digital signature management
 int PyXmlSec_DSModule_Init(PyObject* package);
 // encryption management
@@ -534,7 +532,6 @@ PYENTRY_FUNC_NAME(void)
     /* Populate final object settings */
     if (PyXmlSec_ConstantsModule_Init(module) < 0) goto ON_FAIL;
     if (PyXmlSec_KeyModule_Init(module) < 0) goto ON_FAIL;
-    if (PyXmlSec_TreeModule_Init(module) < 0) goto ON_FAIL;
     if (PyXmlSec_DSModule_Init(module) < 0) goto ON_FAIL;
     if (PyXmlSec_EncModule_Init(module) < 0) goto ON_FAIL;
 

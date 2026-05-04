@@ -304,8 +304,53 @@ class EncryptionContext:
             raise InternalError('encrypt_xml(Type=Content) produced no EncryptedData child')
 
     def decrypt(self, node: _Element) -> _Element | bytes:
-        """Decrypt ``node``. Returns either bytes or an lxml ``_Element``."""
-        return self._impl.decrypt(node)
+        """Decrypt ``node`` (an ``EncryptedData`` or ``EncryptedKey`` element).
+
+        If decryption yields binary data, returns it as ``bytes``.
+        Otherwise mutates the user's tree in place and returns the
+        decrypted ``_Element`` reference (matching the prior C behavior:
+        for ``Type=Content`` the parent is returned with its content
+        replaced; for ``Type=Element`` or root replacement the
+        decrypted subtree replaces ``node`` in place).
+        """
+        if not etree.iselement(node):
+            raise TypeError('node must be lxml.etree._Element')
+
+        # Capture Type and parent BEFORE the round-trip — we need them
+        # to decide how to splice the result back.
+        type_attr = node.get('Type')
+        is_content = type_attr == _TYPE_ENC_CONTENT
+        parent = node.getparent()
+
+        xml_bytes, base_url = _bridge.serialize(node)
+        node_path = _bridge.structural_path(node)
+        kind, payload = self._impl._decrypt(xml_bytes, base_url, node_path)
+        if kind == 'bytes':
+            return payload
+
+        new_tree = _bridge.parse(payload, base_url)
+        if parent is None:
+            # Root replacement: post-op tree's root IS the decrypted root.
+            new_root = new_tree.getroot()
+            node.getroottree()._setroot(copy.deepcopy(new_root))
+            return node.getroottree().getroot()
+
+        if is_content:
+            # Type=Content: ``node`` is removed entirely and its parent's
+            # content (text / children) is replaced by the decrypted
+            # payload in-place. The original C version returned the
+            # parent in this case (src/enc.c:421-429).
+            parent_path = _bridge.structural_path(parent)
+            post_op_parent = _bridge.locate(new_tree, parent_path)
+            _bridge.replace_in_place(parent, post_op_parent)
+            return parent
+
+        # Type=Element (or anything that isn't Content): node is replaced
+        # by the decrypted element at the same parent slot.
+        post_op_at_path = _bridge.locate(new_tree, node_path)
+        decrypted = copy.deepcopy(post_op_at_path)
+        parent.replace(node, decrypted)
+        return decrypted
 
     def reset(self) -> None:
         self._impl.reset()

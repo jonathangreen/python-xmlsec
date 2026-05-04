@@ -38,12 +38,20 @@ class TestMemoryLeaks(unittest.TestCase):
         if self.iterations == 0:
             return
 
+        # Collect any cyclic garbage left over from the first run before
+        # establishing the baseline. lxml elements form natural cycles
+        # (element ↔ document) that refcounting alone cannot release, so we
+        # rely on a generational sweep here. Without this, Python-level
+        # construction (templates, tree walks) shows up as monotonic growth
+        # against the harness's strict thresholds even when nothing leaks.
+        gc.collect()
         m_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         o_count = gc.get_count()[0]
         m_hits = 0
         o_hits = 0
         for _ in range(self.iterations):
             super().run(result=result)
+            gc.collect()
             m_usage_n = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             if m_usage_n > m_usage:
                 m_usage = m_usage_n

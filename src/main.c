@@ -491,8 +491,6 @@ int PyXmlSec_TreeModule_Init(PyObject* package);
 int PyXmlSec_DSModule_Init(PyObject* package);
 // encryption management
 int PyXmlSec_EncModule_Init(PyObject* package);
-// templates management
-int PyXmlSec_TemplateModule_Init(PyObject* package);
 
 static int PyXmlSec_PyClear(PyObject *self) {
     PyXmlSec_Free(free_mode);
@@ -539,7 +537,6 @@ PYENTRY_FUNC_NAME(void)
     if (PyXmlSec_TreeModule_Init(module) < 0) goto ON_FAIL;
     if (PyXmlSec_DSModule_Init(module) < 0) goto ON_FAIL;
     if (PyXmlSec_EncModule_Init(module) < 0) goto ON_FAIL;
-    if (PyXmlSec_TemplateModule_Init(module) < 0) goto ON_FAIL;
 
     PY_MOD_RETURN(module);
 ON_FAIL:

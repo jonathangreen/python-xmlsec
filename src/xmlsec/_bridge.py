@@ -13,14 +13,19 @@ libxml2 — that's the whole point of #356.
 from __future__ import annotations
 
 import copy
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from lxml import etree
 from lxml.etree import _Element, _ElementTree
 
 # An id spec is (structural_path, attr_name, attr_namespace_or_None).
 # Resolved just-in-time before each crypto call.
-IdSpec = Tuple[List[int], str, str | None]
+#
+# Note: ``Optional[str]`` rather than PEP 604 ``str | None`` because this
+# is a runtime assignment (not an annotation), so ``from __future__ import
+# annotations`` does not defer it, and Python 3.9 — still in the support
+# matrix — evaluates ``str | None`` eagerly and rejects it.
+IdSpec = Tuple[List[int], str, Optional[str]]
 
 
 def serialize(elem: _Element) -> Tuple[bytes, str | None]:

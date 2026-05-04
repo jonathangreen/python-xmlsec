@@ -1,9 +1,8 @@
 import html.parser
 import os
 import re
-from distutils import log
-from distutils.version import StrictVersion as Version
 
+from ._compat import log, parse_version as Version
 from .network import make_request
 
 

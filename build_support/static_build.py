@@ -1,6 +1,6 @@
 import sys
-from distutils.errors import DistutilsError
 
+from ._compat import BuildError as DistutilsError
 from .lib_xmlsec_dependency_builder import CrossCompileInfo, LibXmlsecDependencyBuilder
 
 

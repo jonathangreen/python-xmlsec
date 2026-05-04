@@ -7,12 +7,12 @@ import sys
 import tarfile
 import zipfile
 from dataclasses import dataclass
-from distutils.errors import DistutilsError
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urljoin
 from urllib.request import urlcleanup
 
+from ._compat import BuildError as DistutilsError
 from .network import download_lib
 from .releases import (
     latest_libiconv_release,

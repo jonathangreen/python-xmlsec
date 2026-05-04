@@ -1,10 +1,10 @@
 import os
 import sys
-from distutils import log
-from distutils.errors import DistutilsError
 
 from setuptools.command.build_ext import build_ext as build_ext_orig
 
+from ._compat import BuildError as DistutilsError
+from ._compat import log
 from .static_build import CrossCompileInfo, StaticBuildHelper
 
 

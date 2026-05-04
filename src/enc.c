@@ -324,14 +324,13 @@ static PyObject* PyXmlSec_EncryptionContext_EncryptXml(PyObject* self, PyObject*
     PYXMLSEC_DUMP(xmlSecEncCtxDebugDump, ctx->handle);
     Py_END_ALLOW_THREADS;
     if (rv < 0) {
-        if (copied != NULL) {
-            // xmlsec attaches `copied` into the doc on success; on failure it
-            // was either freed already or still detached. Be defensive.
-            // (xmlSecEncCtxXmlEncrypt's docs are unclear; in practice freeing
-            // here is safe because copied was never inserted.)
-            xmlFreeNode(copied);
-            copied = NULL;
-        }
+        // ``copied`` was created via xmlDocCopyNode(..., node_doc, ...), so
+        // node_doc tracks the node either as part of its tree (if xmlsec
+        // attached it before failing) or as an unreferenced free node (if
+        // xmlsec freed its own reference but left node_doc owning it). In
+        // both cases ``xmlFreeDoc(node_doc)`` below cleans up correctly.
+        // Calling xmlFreeNode(copied) explicitly here would risk a
+        // double-free in the first case.
         PyXmlSec_SetLastError("failed to encrypt xml");
         goto ON_FAIL;
     }

@@ -56,6 +56,10 @@ _NODE_CIPHER_DATA = 'CipherData'
 _NODE_CIPHER_VALUE = 'CipherValue'
 _NODE_INCLUSIVE_NAMESPACES = 'InclusiveNamespaces'
 
+# Duck-typed marker for ``xmlsec.constants.__Transform`` instances.
+# TODO: replace this with isinstance(transform, _impl.constants._Transform)
+# once the C type is exposed by name; relying on ``tp_name`` is brittle if
+# the C extension ever renames the type.
 _TRANSFORM_TYPE_NAME = '__Transform'
 
 
@@ -65,7 +69,6 @@ def _check_element(node: _Element, what: str = 'node') -> None:
 
 
 def _check_transform(transform: object, what: str = 'transform') -> None:
-    # Mirror the C check: arg must be an instance of xmlsec.constants.__Transform.
     if type(transform).__name__ != _TRANSFORM_TYPE_NAME or not hasattr(transform, 'href'):
         raise TypeError(f'{what} must be an xmlsec.constants.__Transform')
 

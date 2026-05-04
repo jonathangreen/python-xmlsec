@@ -1,13 +1,14 @@
 """Pure-Python implementation of ``xmlsec.tree``.
 
 These helpers used to wrap libxmlsec's ``xmlSecFindChild`` /
-``xmlSecFindParent`` / ``xmlSecFindNode`` and mutate libxml2 directly. They
-were on the lxml/xmlsec1 ABI boundary even though they did no cryptography.
-The pure-Python implementations below keep the exact same behavior using
-lxml's own libxml2, so xmlsec1 never sees an lxml node here.
-
-``add_ids`` still calls into the C extension for now — it touches the libxml2
-ID table and is migrated in a later PR.
+``xmlSecFindParent`` / ``xmlSecFindNode`` / ``xmlSecAddIDs`` and mutate
+libxml2 directly. They were on the lxml/xmlsec1 ABI boundary even though
+they did no cryptography. The pure-Python implementations below keep the
+exact same behavior using lxml's own libxml2; xmlsec1 never sees an lxml
+node here. ``add_ids`` records its registrations on the bridge's
+process-level registry, which the SignatureContext / EncryptionContext
+wrappers expand into per-element id specs at sign / verify / encrypt /
+decrypt time and apply against the freshly parsed doc on the C side.
 """
 
 from __future__ import annotations
@@ -35,8 +36,10 @@ def add_ids(node: _Element, ids):
     parsed from the user's serialized bytes — no lxml-owned xmlNodePtr
     is dereferenced.
 
-    The full migration (including pruning of stale entries) lands in a
-    later PR; for now this is a thin record-only registration.
+    Registrations live on a process-level list in ``xmlsec._bridge``;
+    dead entries (subtree no longer attached to any tree) are pruned
+    on each crypto call, so long-running processes do not accumulate
+    them indefinitely.
     """
     if not etree.iselement(node):
         raise TypeError('node must be lxml.etree._Element')

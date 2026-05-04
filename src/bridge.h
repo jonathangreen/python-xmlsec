@@ -36,13 +36,14 @@ PyObject* pyxmlsec_dump_doc(xmlDocPtr doc);
 xmlNodePtr pyxmlsec_resolve_path(xmlDocPtr doc, PyObject* index_list);
 
 // Apply a list of (path, attr_name, attr_ns_or_None) id specs against
-// ``doc`` by calling xmlAddID for each matching attribute. Mirrors
-// SignatureContext.register_id semantics from src/ds.c:131-180:
-// raises xmlsec.Error("missing attribute.") if attr is absent,
-// xmlsec.Error("duplicated id.") if a different attr is already
-// registered with the same id value, no-ops if the same attr is already
-// registered. Returns 0 on success, -1 with a Python exception on
-// failure.
+// ``doc`` by calling xmlAddID for each matching attribute. Preserves
+// the prior SignatureContext.register_id semantics (now lifted into
+// the Python wrapper):
+//  - raises xmlsec.Error("missing attribute.") if attr is absent;
+//  - raises xmlsec.Error("duplicated id.") if a *different* attr is
+//    already registered with the same id value;
+//  - no-ops if the same attr is already registered.
+// Returns 0 on success, -1 with a Python exception on failure.
 int pyxmlsec_apply_id_specs(xmlDocPtr doc, PyObject* spec_list);
 
 #endif // __PYXMLSEC_BRIDGE_H__

@@ -78,15 +78,36 @@ def locate(tree: _ElementTree, path: List[int]) -> _Element:
 
 # Process-level registry populated by ``tree.add_ids``. Each entry is a
 # ``(subtree_root, list_of_attr_names)`` pair. Expanded just-in-time at
-# every crypto call into per-element id specs against the freshly
-# parsed doc inside the C extension. Strong refs are used for now;
-# PR 6 will move to a registry keyed on the user's _ElementTree once
-# ``tree.add_ids`` is fully migrated to Python.
+# every crypto call into per-element id specs against the freshly parsed
+# doc inside the C extension.
+#
+# Strong refs are unavoidable here: lxml's ``_Element`` proxies aren't
+# weakref-able, so we cannot let GC drop registrations automatically. To
+# keep this from accumulating forever in long-running processes, we prune
+# dead entries on every ``expand_tree_id_specs`` call — a registration
+# whose subtree root no longer belongs to a live document tree (or whose
+# tree the user has dropped) is removed eagerly. The bound on retained
+# memory is therefore "lifetime of the longest-lived tree the user is
+# still actively signing/verifying against".
 _TREE_ID_REGISTRATIONS: List[Tuple[_Element, List[str]]] = []
 
 
 def add_id_registration(root: _Element, attr_names: List[str]) -> None:
     _TREE_ID_REGISTRATIONS.append((root, list(attr_names)))
+
+
+def _is_live_root(elem: _Element) -> bool:
+    """True if ``elem`` is still attached to (or is) a document root.
+
+    A registration whose root element is no longer reachable through any
+    document tree is dead — it cannot contribute id specs anymore. lxml
+    raises if ``getroottree()`` is called on a fully-destroyed proxy; we
+    treat any failure as dead.
+    """
+    try:
+        return elem.getroottree().getroot() is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def expand_tree_id_specs(op_tree: _ElementTree) -> List[IdSpec]:
@@ -96,21 +117,29 @@ def expand_tree_id_specs(op_tree: _ElementTree) -> List[IdSpec]:
     spec per descendant whose attribute is present. Tree identity is checked
     by comparing root elements (lxml returns a fresh ``_ElementTree`` proxy
     on every ``getroottree()``, so ``is`` on the wrapper would always fail).
-    Dead registrations are skipped but not pruned here.
+    Prunes dead registrations from ``_TREE_ID_REGISTRATIONS`` as a side
+    effect to bound long-running-process memory.
     """
     op_root = op_tree.getroot()
     specs: List[IdSpec] = []
-    for root, attr_names in _TREE_ID_REGISTRATIONS:
-        try:
-            reg_root = root.getroottree().getroot()
-        except Exception:  # noqa: BLE001 — element invalidated
-            continue
-        if reg_root is not op_root:
-            continue
+    # Iterate over a snapshot so concurrent add_id_registration calls
+    # are not visible to this expansion (and survive pruning below).
+    snapshot = list(_TREE_ID_REGISTRATIONS)
+    survivors: List[Tuple[_Element, List[str]]] = []
+    for root, attr_names in snapshot:
+        if not _is_live_root(root):
+            continue  # dead — drop
+        survivors.append((root, attr_names))
+        if root.getroottree().getroot() is not op_root:
+            continue  # alive but not relevant to this op
         for descendant in root.iter():
             for attr_name in attr_names:
                 if descendant.get(attr_name) is not None:
                     specs.append((structural_path(descendant), attr_name, None))
+    # Prune in place. Any entries appended by another thread during this
+    # expansion sit beyond ``len(snapshot)`` in the live list and are
+    # preserved by replacing only the snapshot prefix.
+    _TREE_ID_REGISTRATIONS[: len(snapshot)] = survivors
     return specs
 
 

@@ -87,57 +87,23 @@ apk add build-base openssl libffi-dev openssl-dev libxslt-dev libxml2-dev xmlsec
 
 ## Troubleshooting
 
-### `lxml & xmlsec libxml2 library version mismatch`
+### `lxml & xmlsec libxml2 library version mismatch` (removed)
 
-`xmlsec` passes `lxml` XML nodes to the underlying `xmlsec1` library. Both
-libraries use `libxml2`, so they must use compatible `libxml2` versions at
-runtime. If `lxml` is installed from a wheel that bundles one `libxml2`
-version while `xmlsec` is built against another system `libxml2`, importing
-or using `xmlsec` can fail with:
+Earlier versions of `xmlsec` passed `lxml` XML nodes directly to the
+underlying `xmlsec1` library, which meant both libraries had to load
+compatible `libxml2` versions at runtime. Mismatches surfaced as a hard
+import-time error of the form
+`xmlsec.InternalError: (-1, 'lxml & xmlsec libxml2 library version mismatch')`.
 
-``` text
-xmlsec.InternalError: (-1, 'lxml & xmlsec libxml2 library version mismatch')
-```
+That dependency is gone. Starting with the release that resolved
+[issue #356](https://github.com/xmlsec/python-xmlsec/issues/356), the C
+extension no longer dereferences `lxml`-owned `libxml2` nodes. XML is
+exchanged between `lxml` and `xmlsec` as serialized bytes, so each library
+can use whichever `libxml2` it links against without any cross-library ABI
+requirement. The runtime mismatch check has been removed.
 
-The most reliable fixes are:
-
-- Use prebuilt wheels for both `lxml` and `xmlsec` when wheels are available
-  for your platform:
-
-  ``` bash
-  pip install --only-binary=lxml,xmlsec lxml xmlsec
-  ```
-
-- If you need to build from source, build both packages against the same
-  locally installed `libxml2`:
-
-  ``` bash
-  pip install --no-binary=lxml,xmlsec lxml xmlsec
-  ```
-
-Do not mix a wheel-built `lxml` with a locally built `xmlsec`, or the other
-way around, unless you know they use the same `libxml2` version.
-
-An `lxml` release upgrade does not by itself mean `xmlsec` is incompatible;
-this error is about the `libxml2` libraries loaded in that environment.
-
-If the error appears only under uWSGI, uWSGI may have loaded the system
-`libxml2` before Python imports `lxml` or `xmlsec`. In that case, make sure
-uWSGI and the Python packages resolve to the same `libxml2`, or rebuild the
-Python packages from source in that environment. If you use `uv`, clear any
-cached mixed builds before reinstalling. For example, to reinstall from
-wheels:
-
-``` bash
-uv pip uninstall lxml xmlsec
-uv cache clean
-uv pip install --only-binary lxml --only-binary xmlsec lxml xmlsec
-```
-
-For background, see
-[issue #356](https://github.com/xmlsec/python-xmlsec/issues/356) and the
-uWSGI edge case in
-[issue #415](https://github.com/xmlsec/python-xmlsec/issues/415).
+If you encounter the historical error on an older `xmlsec` release, upgrade
+to a release that includes the issue #356 fix.
 
 ### Mac
 

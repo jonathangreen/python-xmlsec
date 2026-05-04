@@ -47,7 +47,10 @@ class LibXmlsecDependencyBuilder:
     }
     UNIX_DEFAULT_LIB_VERSIONS: ClassVar[dict[str, str]] = {
         'libiconv_version': '1.18',
-        'libxml2_version': '2.14.6',  # Make sure it matches with lxml
+        # libxml2 no longer needs to match lxml's bundled version (issue
+        # #356): the C extension only handles documents it parsed itself.
+        # Pick a version supported by the bundled xmlsec1 release.
+        'libxml2_version': '2.14.6',
         'libxslt_version': '1.1.43',
         'openssl_version': '3.6.0',
         'xmlsec1_version': '1.3.11',
@@ -55,7 +58,8 @@ class LibXmlsecDependencyBuilder:
     }
     WINDOWS_DEFAULT_LIB_VERSIONS: ClassVar[dict[str, str]] = {
         'libiconv_version': '1.18-1',
-        'libxml2_version': '2.11.9-3',  # Make sure it matches with lxml
+        # See note above re: libxml2 / lxml version matching.
+        'libxml2_version': '2.11.9-3',
         'libxslt_version': '1.1.39',
         'openssl_version': '3.5.6',
         'xmlsec1_version': '1.3.11',

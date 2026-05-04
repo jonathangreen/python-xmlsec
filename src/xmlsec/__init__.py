@@ -99,7 +99,9 @@ class SignatureContext:
             if existing_value != value:
                 continue
             if existing_node is node and existing_attr == id_attr and existing_ns == id_ns:
-                return  # exact same registration: no-op (matches xmlGetID == attr in C)
+                # Exact same registration is a no-op, matching libxmlsec's
+                # behavior where ``xmlGetID(...) == attr`` short-circuits.
+                return
             raise Error('duplicated id.')
 
         self._id_registrations.append((node, id_attr, id_ns, value))
@@ -186,9 +188,9 @@ class EncryptionContext:
     """XML Encryption context.
 
     Python wrapper around ``xmlsec._impl.EncryptionContext``. Owns the
-    lxml↔bytes bridge for ``encrypt_binary``, ``encrypt_uri``, and
-    ``encrypt_xml``; ``decrypt`` is still C-resident and migrates in a
-    later PR.
+    lxml↔bytes bridge for ``encrypt_binary``, ``encrypt_uri``,
+    ``encrypt_xml``, and ``decrypt``; the C extension only ever operates
+    on documents parsed inside python-xmlsec's own libxml2.
     """
 
     def __init__(self, manager: KeysManager | None = None) -> None:
@@ -278,9 +280,9 @@ class EncryptionContext:
         result_bytes = self._impl._encrypt_xml(
             node_doc_bytes,
             base_url,
-            template_path if template_path is not None else None,
+            template_path,
             node_path,
-            template_bytes_obj if template_bytes_obj is not None else None,
+            template_bytes_obj,
         )
 
         new_tree = _bridge.parse(result_bytes, base_url)

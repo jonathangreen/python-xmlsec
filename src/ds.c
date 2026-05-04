@@ -582,7 +582,7 @@ static PyMethodDef PyXmlSec_SignatureContextMethods[] = {
 
 static PyTypeObject _PyXmlSec_SignatureContextType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    STRINGIFY(MODULE_NAME) ".SignatureContext", /* tp_name */
+    MODULE_TYPE_PREFIX ".SignatureContext",     /* tp_name */
     sizeof(PyXmlSec_SignatureContext),          /* tp_basicsize */
     0,                                          /* tp_itemsize */
     PyXmlSec_SignatureContext__del__,           /* tp_dealloc */

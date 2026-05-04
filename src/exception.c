@@ -196,13 +196,13 @@ int PyXmlSec_ExceptionsModule_Init(PyObject* package) {
     PyXmlSec_VerificationError = NULL;
 
     if ((PyXmlSec_Error = PyErr_NewExceptionWithDoc(
-            STRINGIFY(MODULE_NAME) ".Error",  "The common exception class.", PyExc_Exception, 0)) == NULL) goto ON_FAIL;
+            MODULE_TYPE_PREFIX ".Error",  "The common exception class.", PyExc_Exception, 0)) == NULL) goto ON_FAIL;
 
     if ((PyXmlSec_InternalError = PyErr_NewExceptionWithDoc(
-            STRINGIFY(MODULE_NAME) ".InternalError",  "The internal exception class.", PyXmlSec_Error, 0)) == NULL) goto ON_FAIL;
+            MODULE_TYPE_PREFIX ".InternalError",  "The internal exception class.", PyXmlSec_Error, 0)) == NULL) goto ON_FAIL;
 
     if ((PyXmlSec_VerificationError = PyErr_NewExceptionWithDoc(
-            STRINGIFY(MODULE_NAME) ".VerificationError",  "The verification exception class.", PyXmlSec_Error, 0)) == NULL) goto ON_FAIL;
+            MODULE_TYPE_PREFIX ".VerificationError",  "The verification exception class.", PyXmlSec_Error, 0)) == NULL) goto ON_FAIL;
 
     if (PyModule_AddObject(package, "Error", PyXmlSec_Error) < 0) goto ON_FAIL;
     if (PyModule_AddObject(package, "InternalError", PyXmlSec_InternalError) < 0) goto ON_FAIL;

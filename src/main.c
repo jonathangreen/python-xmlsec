@@ -501,7 +501,7 @@ static int PyXmlSec_PyClear(PyObject *self) {
 
 static PyModuleDef PyXmlSecModule = {
     PyModuleDef_HEAD_INIT,
-    STRINGIFY(MODULE_NAME), /* name of module */
+    MODULE_FULL_NAME,       /* name of module: "xmlsec._impl" */
     MODULE_DOC,             /* module documentation, may be NULL */
     -1,                     /* size of per-interpreter state of the module,
                                or -1 if the module keeps state in global variables. */
@@ -512,7 +512,7 @@ static PyModuleDef PyXmlSecModule = {
     NULL,                   /* m_free */
 };
 
-#define PYENTRY_FUNC_NAME JOIN(PyInit_, MODULE_NAME)
+#define PYENTRY_FUNC_NAME JOIN(PyInit_, MODULE_INIT_NAME)
 #define PY_MOD_RETURN(m) return m
 
 PyMODINIT_FUNC

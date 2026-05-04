@@ -233,7 +233,7 @@ static PyMethodDef PyXmlSec_TreeMethods[] = {
 static PyModuleDef PyXmlSec_TreeModule =
 {
     PyModuleDef_HEAD_INIT,
-    STRINGIFY(MODULE_NAME) ".tree",
+    MODULE_FULL_NAME ".tree",
     PYXMLSEC_TREE_DOC,
     -1,
     PyXmlSec_TreeMethods,     /* m_methods */

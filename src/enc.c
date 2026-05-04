@@ -496,7 +496,7 @@ static PyMethodDef PyXmlSec_EncryptionContextMethods[] = {
 
 static PyTypeObject _PyXmlSec_EncryptionContextType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    STRINGIFY(MODULE_NAME) ".EncryptionContext", /* tp_name */
+    MODULE_TYPE_PREFIX ".EncryptionContext",    /* tp_name */
     sizeof(PyXmlSec_EncryptionContext),          /* tp_basicsize */
     0,                                           /* tp_itemsize */
     PyXmlSec_EncryptionContext__del__,           /* tp_dealloc */

@@ -28,7 +28,7 @@ class build_ext(build_ext_orig):
         self.announce(message, level=log.INFO)
 
     def run(self) -> None:
-        ext = self.ext_map['xmlsec']
+        ext = self.ext_map['xmlsec._impl']
         if self.static or sys.platform == 'win32':
             helper = StaticBuildHelper(self)
             helper.prepare(sys.platform)
@@ -55,7 +55,11 @@ class build_ext(build_ext_orig):
         ext.include_dirs.extend(lxml.get_include())
 
         ext.define_macros.extend(
-            [('MODULE_NAME', self.distribution.metadata.name), ('MODULE_VERSION', self.distribution.metadata.version)]
+            [
+                ('MODULE_PACKAGE_NAME', self.distribution.metadata.name),
+                ('MODULE_INIT_NAME', '_impl'),
+                ('MODULE_VERSION', self.distribution.metadata.version),
+            ]
         )
         for key, value in ext.define_macros:
             if key == 'XMLSEC_CRYPTO' and not (value.startswith('"') and value.endswith('"')):

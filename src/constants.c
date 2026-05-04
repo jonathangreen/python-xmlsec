@@ -85,7 +85,7 @@ static PyGetSetDef PyXmlSec_TransformGetSet[] = {
 
 static PyTypeObject _PyXmlSec_TransformType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    STRINGIFY(MODULE_NAME) ".constants.__Transform", /* tp_name */
+    MODULE_TYPE_PREFIX ".constants.__Transform",     /* tp_name */
     sizeof(PyXmlSec_Transform),                      /* tp_basicsize */
     0,                                               /* tp_itemsize */
     PyXmlSec_Transform__del__,                       /* tp_dealloc */
@@ -195,7 +195,7 @@ static PyGetSetDef PyXmlSec_KeyDataGetSet[] = {
 
 static PyTypeObject _PyXmlSec_KeyDataType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    STRINGIFY(MODULE_NAME) ".constants.__KeyData",  /* tp_name */
+    MODULE_TYPE_PREFIX ".constants.__KeyData",      /* tp_name */
     sizeof(PyXmlSec_KeyData),                       /* tp_basicsize */
     0,                                              /* tp_itemsize */
     PyXmlSec_KeyData__del__,                        /* tp_dealloc */
@@ -248,7 +248,7 @@ static PyObject* PyXmlSec_KeyDataNew(xmlSecKeyDataId id) {
 static PyModuleDef PyXmlSec_ConstantsModule =
 {
     PyModuleDef_HEAD_INIT,
-    STRINGIFY(MODULE_NAME) ".constants",
+    MODULE_FULL_NAME ".constants",
     PYXMLSEC_CONSTANTS_DOC,
     -1, NULL, NULL, NULL, NULL, NULL
 };

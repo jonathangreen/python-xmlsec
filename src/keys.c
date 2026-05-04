@@ -597,7 +597,7 @@ static PyMethodDef PyXmlSec_KeyMethods[] = {
 
 static PyTypeObject _PyXmlSec_KeyType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    STRINGIFY(MODULE_NAME) ".Key",              /* tp_name */
+    MODULE_TYPE_PREFIX ".Key",                  /* tp_name */
     sizeof(PyXmlSec_Key),                       /* tp_basicsize */
     0,                                          /* tp_itemsize */
     PyXmlSec_Key__del__,                        /* tp_dealloc */
@@ -839,7 +839,7 @@ static PyMethodDef PyXmlSec_KeysManagerMethods[] = {
 
 static PyTypeObject _PyXmlSec_KeysManagerType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    STRINGIFY(MODULE_NAME) ".KeysManager",      /* tp_name */
+    MODULE_TYPE_PREFIX ".KeysManager",          /* tp_name */
     sizeof(PyXmlSec_KeysManager),               /* tp_basicsize */
     0,                                          /* tp_itemsize */
     PyXmlSec_KeysManager__del__,                /* tp_dealloc */

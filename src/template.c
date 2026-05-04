@@ -921,7 +921,7 @@ static PyMethodDef PyXmlSec_TemplateMethods[] = {
 static PyModuleDef PyXmlSec_TemplateModule =
 {
     PyModuleDef_HEAD_INIT,
-    STRINGIFY(MODULE_NAME) ".template",
+    MODULE_FULL_NAME ".template",
     PYXMLSEC_TEMPLATES_DOC,
     -1,
     PyXmlSec_TemplateMethods, /* m_methods */

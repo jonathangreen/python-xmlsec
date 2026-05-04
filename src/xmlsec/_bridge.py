@@ -212,3 +212,32 @@ def replace_in_place(target: _Element, source: _Element) -> None:
         target.append(copy.deepcopy(child))
 
 
+def replace_in_place_preserving_path(target: _Element, source: _Element, preserve_path: List[int]) -> _Element:
+    """Mutate ``target`` to match ``source`` while preserving one descendant.
+
+    ``preserve_path`` uses the same element-only structural indexes as
+    ``structural_path``. The element at that path in ``target`` keeps its
+    Python identity, but its contents are updated from the corresponding
+    ``source`` element. All other descendants are replaced from ``source``.
+    """
+    if not preserve_path:
+        replace_in_place(target, source)
+        return target
+
+    preserve_idx = preserve_path[0]
+    target_child = _element_children(target)[preserve_idx]
+    source_child = _element_children(source)[preserve_idx]
+    preserved = replace_in_place_preserving_path(target_child, source_child, preserve_path[1:])
+
+    target.text = source.text
+    target.attrib.clear()
+    for k, v in source.attrib.items():
+        target.set(k, v)
+    for child in list(target):
+        target.remove(child)
+    for child in list(source):
+        if child is source_child:
+            target.append(target_child)
+        else:
+            target.append(copy.deepcopy(child))
+    return preserved

@@ -119,12 +119,12 @@ class TestEncryptionContext(base.TestMemoryLeaks):
 
     def test_encrypt_xml_bad_template(self):
         ctx = xmlsec.EncryptionContext()
-        with self.assertRaisesRegex(xmlsec.Error, 'unsupported `Type`, it should be `element`'):
+        with self.assertRaisesRegex(xmlsec.Error, 'unsupported `Type`, it should be `element` or `content`'):
             ctx.encrypt_xml(etree.Element('root'), etree.Element('node'))
 
     def test_encrypt_xml_bad_template_bad_type_attribute(self):
         ctx = xmlsec.EncryptionContext()
-        with self.assertRaisesRegex(xmlsec.Error, 'unsupported `Type`, it should be `element`'):
+        with self.assertRaisesRegex(xmlsec.Error, 'unsupported `Type`, it should be `element` or `content`'):
             root = etree.Element('root')
             root.attrib['Type'] = 'foo'
             ctx.encrypt_xml(root, etree.Element('node'))

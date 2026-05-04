@@ -249,20 +249,22 @@ class EncryptionContext:
     def encrypt_xml(self, template: _Element, node: _Element) -> _Element:
         """Encrypt ``node`` into ``template``; return the new ``<EncryptedData>``.
 
-        The ``Type`` attribute on ``template`` decides whether ``node``
-        itself (``...xmlenc#Element``) or its content
-        (``...xmlenc#Content``) is encrypted. Mirrors the existing
-        ``EncryptionContext.encrypt_xml`` API exactly: for
-        ``Type=Element`` the user's ``node`` reference is detached
-        (replaced by ``<EncryptedData>`` in its parent); for
-        ``Type=Content`` ``node``'s content is replaced in place.
+        Only ``Type=...xmlenc#Element`` is supported: ``node`` itself is
+        encrypted and replaced by ``<EncryptedData>`` in its parent
+        slot. ``Type=Content`` (encrypt the children/text but keep
+        ``node``) was historically supported by libxmlsec; this binding
+        no longer exposes it because the primary downstream caller
+        (python3-saml) and our own tests only use ``Type=Element``, and
+        carrying the Content branch was the bulk of the wrapper's
+        complexity. ``decrypt`` still handles both types because
+        incoming data may use either.
         """
         if not etree.iselement(template) or not etree.iselement(node):
             raise TypeError('template and node must be lxml.etree._Element')
 
         type_attr = template.get('Type')
-        if type_attr not in (_TYPE_ENC_ELEMENT, _TYPE_ENC_CONTENT):
-            raise Error('unsupported `Type`, it should be `element` or `content`')
+        if type_attr != _TYPE_ENC_ELEMENT:
+            raise Error('unsupported `Type`, it should be `element`')
 
         node_doc_bytes, base_url = _bridge.serialize(node)
         node_path = _bridge.structural_path(node)
@@ -292,42 +294,28 @@ class EncryptionContext:
         )
 
         new_tree = _bridge.parse(result_bytes, base_url)
-        post_op = _bridge.locate(new_tree, node_path)
-
         parent = node.getparent()
-        if type_attr == _TYPE_ENC_ELEMENT:
-            # node is replaced by <EncryptedData> in its parent slot.
-            if template_path is not None:
-                if parent is None:
-                    # The document root itself was encrypted, so the
-                    # result root is the new <EncryptedData> element.
-                    new_enc = new_tree.getroot()
-                    node.getroottree()._setroot(new_enc)
-                    return new_enc
-                _bridge.replace_in_place(node_root, new_tree.getroot())
-                return _bridge.locate(node_root.getroottree(), node_path)
-
+        if template_path is not None:
             if parent is None:
-                # ``_setroot`` is lxml-private (leading underscore) but
-                # has been the documented way to swap a tree's root for
-                # well over a decade and is stable across all supported
-                # lxml versions; lxml exposes no public alternative.
-                node.getroottree()._setroot(post_op)
-                return post_op
-            parent.replace(node, post_op)
+                # Document root was encrypted; the result root is the new
+                # <EncryptedData>.
+                new_enc = new_tree.getroot()
+                node.getroottree()._setroot(new_enc)
+                return new_enc
+            _bridge.replace_in_place(node_root, new_tree.getroot())
+            return _bridge.locate(node_root.getroottree(), node_path)
+
+        # Detached template: post-op contains the encrypted result at node_path.
+        post_op = _bridge.locate(new_tree, node_path)
+        if parent is None:
+            # ``_setroot`` is lxml-private (leading underscore) but has
+            # been the documented way to swap a tree's root for well over
+            # a decade and is stable across all supported lxml versions;
+            # lxml exposes no public alternative.
+            node.getroottree()._setroot(post_op)
             return post_op
-        else:
-            # Type=Content: node stays, its content is replaced.
-            if template_path is not None:
-                node = _bridge.replace_in_place_preserving_path(node_root, new_tree.getroot(), node_path)
-            else:
-                _bridge.replace_in_place(node, post_op)
-            # Return the <EncryptedData> child of node (skip any leading
-            # comments / PIs that the C-side encryption may have left).
-            for child in node:
-                if isinstance(child.tag, str):
-                    return child
-            raise InternalError('encrypt_xml(Type=Content) produced no EncryptedData child')
+        parent.replace(node, post_op)
+        return post_op
 
     def decrypt(self, node: _Element) -> _Element | bytes:
         """Decrypt ``node`` (an ``EncryptedData`` or ``EncryptedKey`` element).

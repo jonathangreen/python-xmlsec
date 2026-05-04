@@ -7,6 +7,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// find_child / find_parent / find_node moved to pure-Python xmlsec/tree.py.
+// Only add_ids remains here; it will move to Python in a later PR (it touches
+// the libxml2 ID table and needs a coordinated migration with sign/verify).
+
 #include "common.h"
 #include "utils.h"
 #include "lxml.h"
@@ -14,129 +18,6 @@
 #include <xmlsec/xmltree.h>
 
 #define PYXMLSEC_TREE_DOC "Common XML utility functions"
-
-static char PyXmlSec_TreeFindChild__doc__[] = \
-    "find_child(parent, name, namespace)\n"
-    "Searches a direct child of the ``parent`` node having given ``name`` and ``namespace`` href.\n\n"
-    ":param parent: the pointer to XML node\n"
-    ":type parent: :class:`lxml.etree._Element`\n"
-    ":param name: the name\n"
-    ":type name: :class:`str`\n"
-    ":param namespace: the namespace href (optional)\n"
-    ":type namespace: :class:`str`\n"
-    ":return: the pointer to the found node or :data:`None` if node is not found\n"
-    ":rtype: :class:`lxml.etree._Element` or :data:`None`";
-static PyObject* PyXmlSec_TreeFindChild(PyObject* self, PyObject *args, PyObject *kwargs) {
-    static char *kwlist[] = { "parent", "name", "namespace", NULL};
-
-    PyXmlSec_LxmlElementPtr node = NULL;
-    const char* name = NULL;
-    const char* ns = (const char*)xmlSecDSigNs;
-    xmlNodePtr res;
-
-    PYXMLSEC_DEBUG("tree find_child - start");
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&s|s:find_child", kwlist,
-        PyXmlSec_LxmlElementConverter, &node, &name, &ns))
-    {
-        goto ON_FAIL;
-    }
-
-    Py_BEGIN_ALLOW_THREADS;
-    res = xmlSecFindChild(node->_c_node, XSTR(name), XSTR(ns));
-    Py_END_ALLOW_THREADS;
-
-    PYXMLSEC_DEBUG("tree find_child - ok");
-    if (res == NULL) {
-        Py_RETURN_NONE;
-    }
-    return (PyObject*)PyXmlSec_elementFactory(node->_doc, res);
-
-ON_FAIL:
-    PYXMLSEC_DEBUG("tree find_child - fail");
-    return NULL;
-}
-
-static char PyXmlSec_TreeFindParent__doc__[] = \
-    "find_parent(node, name, namespace)\n"
-    "Searches the ancestors axis of the ``node`` having given ``name`` and ``namespace`` href.\n\n"
-    ":param node: the pointer to XML node\n"
-    ":type node: :class:`lxml.etree._Element`\n"
-    ":param name: the name\n"
-    ":type name: :class:`str`\n"
-    ":param namespace: the namespace href (optional)\n"
-    ":type namespace: :class:`str`\n"
-    ":return: the pointer to the found node or :data:`None` if node is not found\n"
-    ":rtype: :class:`lxml.etree._Element` or :data:`None`";
-static PyObject* PyXmlSec_TreeFindParent(PyObject* self, PyObject *args, PyObject *kwargs) {
-    static char *kwlist[] = { "node", "name", "namespace", NULL};
-
-    PyXmlSec_LxmlElementPtr node = NULL;
-    const char* name = NULL;
-    const char* ns = (const char*)xmlSecDSigNs;
-    xmlNodePtr res;
-
-    PYXMLSEC_DEBUG("tree find_parent - start");
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&s|s:find_parent", kwlist,
-        PyXmlSec_LxmlElementConverter, &node, &name, &ns))
-    {
-        goto ON_FAIL;
-    }
-
-    Py_BEGIN_ALLOW_THREADS;
-    res = xmlSecFindParent(node->_c_node, XSTR(name), XSTR(ns));
-    Py_END_ALLOW_THREADS;
-
-    PYXMLSEC_DEBUG("tree find_parent - ok");
-    if (res == NULL) {
-        Py_RETURN_NONE;
-    }
-    return (PyObject*)PyXmlSec_elementFactory(node->_doc, res);
-
-ON_FAIL:
-    PYXMLSEC_DEBUG("tree find_parent - fail");
-    return NULL;
-}
-
-static char PyXmlSec_TreeFindNode__doc__[] = \
-    "find_node(node, name, namespace)\n"
-    "Searches all children of the given ``node`` having given ``name`` and ``namespace`` href.\n\n"
-    ":param node: the pointer to XML node\n"
-    ":type node: :class:`lxml.etree._Element`\n"
-    ":param name: the name\n"
-    ":type name: :class:`str`\n"
-    ":param namespace: the namespace href (optional)\n"
-    ":type namespace: :class:`str`\n"
-    ":return: the pointer to the found node or :data:`None` if node is not found\n"
-    ":rtype: :class:`lxml.etree._Element` or :data:`None`";
-static PyObject* PyXmlSec_TreeFindNode(PyObject* self, PyObject *args, PyObject *kwargs) {
-    static char *kwlist[] = { "node", "name", "namespace", NULL};
-
-    PyXmlSec_LxmlElementPtr node = NULL;
-    const char* name = NULL;
-    const char* ns = (const char*)xmlSecDSigNs;
-    xmlNodePtr res;
-
-    PYXMLSEC_DEBUG("tree find_node - start");
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O&s|s:find_node", kwlist,
-        PyXmlSec_LxmlElementConverter, &node, &name, &ns))
-    {
-        goto ON_FAIL;
-    }
-
-    Py_BEGIN_ALLOW_THREADS;
-    res = xmlSecFindNode(node->_c_node, XSTR(name), XSTR(ns));
-    Py_END_ALLOW_THREADS;
-
-    PYXMLSEC_DEBUG("tree find_node - ok");
-    if (res == NULL) {
-        Py_RETURN_NONE;
-    }
-    return (PyObject*)PyXmlSec_elementFactory(node->_doc, res);
-
-ON_FAIL:
-    PYXMLSEC_DEBUG("tree find_node - fail");
-    return NULL;
-}
 
 static char PyXmlSec_TreeAddIds__doc__[] = \
     "add_ids(node, ids) -> None\n"
@@ -203,24 +84,6 @@ ON_FAIL:
 }
 
 static PyMethodDef PyXmlSec_TreeMethods[] = {
-    {
-        "find_child",
-        (PyCFunction)PyXmlSec_TreeFindChild,
-        METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_TreeFindChild__doc__,
-    },
-    {
-        "find_parent",
-        (PyCFunction)PyXmlSec_TreeFindParent,
-        METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_TreeFindParent__doc__,
-    },
-    {
-        "find_node",
-        (PyCFunction)PyXmlSec_TreeFindNode,
-        METH_VARARGS|METH_KEYWORDS,
-        PyXmlSec_TreeFindNode__doc__,
-    },
     {
         "add_ids",
         (PyCFunction)PyXmlSec_TreeAddIds,

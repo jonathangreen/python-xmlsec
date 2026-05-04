@@ -6,7 +6,7 @@ symbols so user code can keep importing from ``xmlsec`` directly.
 
 import sys as _sys
 
-from xmlsec import _impl
+from xmlsec import _impl, tree
 from xmlsec._impl import (
     EncryptionContext,
     Error,
@@ -28,14 +28,13 @@ from xmlsec._impl import (
     register_default_callbacks,
     shutdown,
     template,
-    tree,
 )
 
 # Expose the C-extension submodules under their public dotted names so that
-# ``import xmlsec.constants`` (and likewise tree/template) resolves to the same
-# module object as ``xmlsec._impl.constants``.
+# ``import xmlsec.constants`` (and ``xmlsec.template``) resolves to the same
+# module object as ``xmlsec._impl.constants``. ``xmlsec.tree`` is now the
+# Python package module ``xmlsec/tree.py``; no aliasing needed.
 _sys.modules.setdefault('xmlsec.constants', constants)
-_sys.modules.setdefault('xmlsec.tree', tree)
 _sys.modules.setdefault('xmlsec.template', template)
 
 __all__ = [

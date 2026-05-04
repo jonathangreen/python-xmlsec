@@ -49,8 +49,21 @@ def parse(data: bytes, base_url: str | None = None) -> _ElementTree:
     Mirrors the parser flags python-xmlsec's C side uses: no network,
     no entity expansion of external entities, no whitespace stripping
     (``remove_blank_text=False``).
+
+    ``recover=True`` accepts XML that references namespace prefixes
+    without a matching ``xmlns:`` declaration in scope. xmlsec's decrypt
+    can produce exactly this when the user passed a detached / deepcopied
+    element whose ancestor namespaces lxml dropped during copy: the
+    ciphertext's cleartext was originally encrypted relying on those
+    inherited namespaces, so the decrypted bytes look like
+    ``<saml:NameID .../>`` with no ``xmlns:saml=`` anywhere. Without
+    recovery, lxml refuses to parse the round-trip result. With it, lxml
+    builds an element whose ``.tag`` is the literal ``"saml:NameID"`` —
+    the same shape master xmlsec returned when it ran decrypt directly
+    on the user's tree, so callers that downstream-equality-check the
+    tag (e.g. python3-saml) keep working.
     """
-    parser = etree.XMLParser(resolve_entities=False, no_network=True, remove_blank_text=False)
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, remove_blank_text=False, recover=True)
     return etree.ElementTree(etree.fromstring(data, parser=parser, base_url=base_url))
 
 

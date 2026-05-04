@@ -16,10 +16,17 @@ from lxml.etree import _Element
 
 from xmlsec import _bridge, _impl, template, tree
 from xmlsec._impl import (
+    EncryptionType,
     Error,
     InternalError,
     Key,
+    KeyData,
+    KeyDataType,
+    KeyFormat,
     KeysManager,
+    Namespace,
+    Node,
+    Transform,
     VerificationError,
     __version__,
     base64_default_line_size,
@@ -379,11 +386,18 @@ class EncryptionContext:
 
 __all__ = [
     'EncryptionContext',
+    'EncryptionType',
     'Error',
     'InternalError',
     'Key',
+    'KeyData',
+    'KeyDataType',
+    'KeyFormat',
     'KeysManager',
+    'Namespace',
+    'Node',
     'SignatureContext',
+    'Transform',
     'VerificationError',
     '__version__',
     'base64_default_line_size',

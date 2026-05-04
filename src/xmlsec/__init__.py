@@ -42,6 +42,12 @@ from xmlsec._impl import (
 # Python package modules; no aliasing needed.
 _sys.modules.setdefault('xmlsec.constants', constants)
 
+# Type values for ``encrypt_xml`` / ``decrypt`` resolved from the C-side
+# constants module so any future libxmlsec-tracked URI changes reach us
+# automatically.
+_TYPE_ENC_ELEMENT = constants.TypeEncElement
+_TYPE_ENC_CONTENT = constants.TypeEncContent
+
 
 class SignatureContext:
     """XML Digital Signature context.
@@ -78,12 +84,12 @@ class SignatureContext:
     def register_id(self, node: _Element, id_attr: str = 'ID', id_ns: str | None = None) -> None:
         """Register an XML id attribute on ``node``.
 
-        Validates eagerly (matching the prior C implementation in
-        src/ds.c:131-180): raises ``Error("missing attribute.")`` if the
-        attribute is absent, ``Error("duplicated id.")`` if a different
-        registration with the same value already exists on this context.
-        The actual ``xmlAddID`` call is deferred to sign/verify time on
-        python-xmlsec's internal libxml2 doc.
+        Validates eagerly (matching the prior C implementation that called
+        ``xmlAddID`` immediately): raises ``Error("missing attribute.")``
+        if the attribute is absent, ``Error("duplicated id.")`` if a
+        different registration with the same value already exists on this
+        context. The actual ``xmlAddID`` call is deferred to sign/verify
+        time on python-xmlsec's internal libxml2 doc.
         """
         if not etree.iselement(node):
             raise TypeError('node must be lxml.etree._Element')
@@ -176,12 +182,6 @@ class SignatureContext:
 
     def set_enabled_key_data(self, keydata_list) -> None:  # noqa: ANN001
         self._impl.set_enabled_key_data(keydata_list)
-
-
-# XMLEnc namespace href and the two recognized Type values for encrypt_xml.
-_ENC_NS = 'http://www.w3.org/2001/04/xmlenc#'
-_TYPE_ENC_ELEMENT = _ENC_NS + 'Element'
-_TYPE_ENC_CONTENT = _ENC_NS + 'Content'
 
 
 class EncryptionContext:
@@ -293,6 +293,10 @@ class EncryptionContext:
             # node is replaced by <EncryptedData> in its parent slot.
             new_enc = copy.deepcopy(post_op)
             if parent is None:
+                # ``_setroot`` is lxml-private (leading underscore) but
+                # has been the documented way to swap a tree's root for
+                # well over a decade and is stable across all supported
+                # lxml versions; lxml exposes no public alternative.
                 node.getroottree()._setroot(new_enc)
             else:
                 parent.replace(node, new_enc)
@@ -333,6 +337,8 @@ class EncryptionContext:
         new_tree = _bridge.parse(payload, base_url)
         if parent is None:
             # Root replacement: post-op tree's root IS the decrypted root.
+            # See note in encrypt_xml about ``_setroot`` being lxml-private
+            # but the only stable way to swap a tree's root.
             new_root = new_tree.getroot()
             node.getroottree()._setroot(copy.deepcopy(new_root))
             return node.getroottree().getroot()

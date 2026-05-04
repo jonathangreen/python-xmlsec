@@ -81,19 +81,39 @@ def locate(tree: _ElementTree, path: List[int]) -> _Element:
 # every crypto call into per-element id specs against the freshly parsed
 # doc inside the C extension.
 #
-# Strong refs are unavoidable here: lxml's ``_Element`` proxies aren't
-# weakref-able, so we cannot let GC drop registrations automatically. To
-# keep this from accumulating forever in long-running processes, we prune
-# dead entries on every ``expand_tree_id_specs`` call — a registration
-# whose subtree root no longer belongs to a live document tree (or whose
-# tree the user has dropped) is removed eagerly. The bound on retained
-# memory is therefore "lifetime of the longest-lived tree the user is
-# still actively signing/verifying against".
+# Strong refs are unavoidable here: lxml's ``_Element`` proxies, the
+# ``_ElementTree`` wrapper, and ``DocInfo`` are all NOT weakref-able
+# (verified empirically), so we cannot let GC drop registrations
+# automatically when the user's tree becomes unreachable. To keep this
+# from accumulating forever in long-running processes:
+#
+#  - ``expand_tree_id_specs`` prunes any entry whose root has been
+#    detached from its tree (``getroottree()`` raises or returns a
+#    different root than the one originally registered against). This
+#    catches the case where the user explicitly removes the registered
+#    subtree from its document.
+#
+#  - ``clear_id_registrations`` is exposed publicly via
+#    ``xmlsec.tree.clear_ids`` so applications running batch / per-
+#    request workloads can drop everything between requests.
+#
+# Without an explicit ``clear_ids`` call, registrations created with
+# ``tree.add_ids(some_root, [...])`` keep ``some_root`` (and therefore
+# the entire document tree it belongs to) alive in this list until the
+# user detaches the registered subtree from the document. For short
+# scripts that's fine. For long-lived services, prefer
+# ``SignatureContext.register_id`` (which is per-context and goes away
+# with the context) or call ``xmlsec.tree.clear_ids`` between requests.
 _TREE_ID_REGISTRATIONS: List[Tuple[_Element, List[str]]] = []
 
 
 def add_id_registration(root: _Element, attr_names: List[str]) -> None:
     _TREE_ID_REGISTRATIONS.append((root, list(attr_names)))
+
+
+def clear_id_registrations() -> None:
+    """Drop every entry in the process-level ``tree.add_ids`` registry."""
+    _TREE_ID_REGISTRATIONS.clear()
 
 
 def _is_live_root(elem: _Element) -> bool:

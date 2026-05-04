@@ -23,7 +23,7 @@ from xmlsec import _bridge, _impl
 
 _consts = _impl.constants
 
-__all__ = ['add_ids', 'find_child', 'find_node', 'find_parent']
+__all__ = ['add_ids', 'clear_ids', 'find_child', 'find_node', 'find_parent']
 
 
 def add_ids(node: _Element, ids):
@@ -48,6 +48,22 @@ def add_ids(node: _Element, ids):
     except TypeError as exc:
         raise TypeError('ids must be a sequence of strings') from exc
     _bridge.add_id_registration(node, attr_names)
+
+
+def clear_ids() -> None:
+    """Drop every ``add_ids`` registration on the process-level registry.
+
+    Useful for long-lived services that call ``add_ids`` per request:
+    because lxml ``_Element`` proxies are not weakref-able the registry
+    holds strong references, so without an explicit clear it will keep
+    every registered document tree alive until the user removes the
+    registered subtree from its document. Calling this between batches
+    of work bounds memory growth.
+
+    For per-context id registration (which is automatically scoped to
+    the context's lifetime), prefer ``SignatureContext.register_id``.
+    """
+    _bridge.clear_id_registrations()
 
 
 def _qname(name: str, namespace: str) -> str:
